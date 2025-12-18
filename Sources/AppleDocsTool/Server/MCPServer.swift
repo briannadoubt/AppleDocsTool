@@ -9,6 +9,7 @@ final class AppleDocsToolServer: @unchecked Sendable {
     private let xcodeParser = XcodeProjectParser()
     private let appleDocsService = AppleDocsService()
     private let localDocsService = LocalDocsService()
+    private let dependencyService = DependencyService()
 
     init() {
         self.server = Server(
@@ -47,7 +48,7 @@ final class AppleDocsToolServer: @unchecked Sendable {
         [
             Tool(
                 name: "get_project_symbols",
-                description: "Extract all symbols (types, functions, properties) from a Swift project (SPM package or Xcode project)",
+                description: "Extract all symbols (types, functions, properties) from a Swift project (SPM package or Xcode project). Can include symbols from dependencies to prevent code duplication.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -63,6 +64,28 @@ final class AppleDocsToolServer: @unchecked Sendable {
                             "type": .string("string"),
                             "description": .string("Minimum access level to include: public, internal, private (default: public)"),
                             "enum": .array([.string("public"), .string("internal"), .string("private")])
+                        ]),
+                        "include_dependencies": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Include symbols from package dependencies (default: false). Set to true to see all available APIs and avoid reimplementing existing functionality.")
+                        ])
+                    ]),
+                    "required": .array([.string("project_path")])
+                ])
+            ),
+            Tool(
+                name: "get_project_dependencies",
+                description: "List all dependencies for a Swift package, including versions, targets, and what each target depends on. Essential for understanding what libraries are available before writing code.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "project_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to Package.swift or directory containing it")
+                        ]),
+                        "include_symbols": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Also extract public symbols from each dependency (default: false). Warning: can be slow for large dependency trees.")
                         ])
                     ]),
                     "required": .array([.string("project_path")])
@@ -140,6 +163,9 @@ final class AppleDocsToolServer: @unchecked Sendable {
             case "get_project_symbols":
                 return try await handleGetProjectSymbols(params.arguments)
 
+            case "get_project_dependencies":
+                return try await handleGetProjectDependencies(params.arguments)
+
             case "get_symbol_documentation":
                 return try await handleGetSymbolDocumentation(params.arguments)
 
@@ -168,6 +194,7 @@ final class AppleDocsToolServer: @unchecked Sendable {
         let targetFilter = args["target"]?.stringValue
         let accessLevelStr = args["minimum_access_level"]?.stringValue ?? "public"
         let minimumAccessLevel = AccessLevel(rawValue: accessLevelStr) ?? .public
+        let includeDependencies = args["include_dependencies"]?.boolValue ?? false
 
         // Detect project type and parse
         let project: Project
@@ -199,7 +226,9 @@ final class AppleDocsToolServer: @unchecked Sendable {
         }
 
         var allSymbols: [Symbol] = []
+        var dependencySymbols: [String: [Symbol]] = [:]
 
+        // Extract project symbols
         for target in targetsToAnalyze {
             do {
                 let symbols = try await symbolGraphService.extractFromPackage(
@@ -214,16 +243,148 @@ final class AppleDocsToolServer: @unchecked Sendable {
             }
         }
 
-        if allSymbols.isEmpty {
+        // Extract dependency symbols if requested
+        if includeDependencies && project.type == .spm {
+            dependencySymbols = try await dependencyService.extractDependencySymbols(
+                at: project.path,
+                minimumAccessLevel: minimumAccessLevel
+            )
+        }
+
+        // Build response
+        var response = "# Project Symbols\n\n"
+        response += "Found \(allSymbols.count) symbols in \(project.name)\n\n"
+
+        if !allSymbols.isEmpty {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let jsonData = try encoder.encode(allSymbols)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
+            response += "## \(project.name) Symbols\n\n\(jsonString)\n\n"
+        }
+
+        if !dependencySymbols.isEmpty {
+            let totalDepSymbols = dependencySymbols.values.reduce(0) { $0 + $1.count }
+            response += "# Dependency Symbols\n\n"
+            response += "Found \(totalDepSymbols) symbols across \(dependencySymbols.count) dependencies\n\n"
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+            for (moduleName, symbols) in dependencySymbols.sorted(by: { $0.key < $1.key }) {
+                response += "## \(moduleName) (\(symbols.count) symbols)\n\n"
+                let jsonData = try encoder.encode(symbols)
+                let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
+                response += "\(jsonString)\n\n"
+            }
+        }
+
+        if allSymbols.isEmpty && dependencySymbols.isEmpty {
             return .init(content: [.text("No symbols found. The project may need to be built first, or no public symbols exist.")], isError: false)
         }
 
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let jsonData = try encoder.encode(allSymbols)
-        let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
+        return .init(content: [.text(response)], isError: false)
+    }
 
-        return .init(content: [.text("Found \(allSymbols.count) symbols in \(project.name):\n\n\(jsonString)")], isError: false)
+    private func handleGetProjectDependencies(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let projectPath = args["project_path"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: project_path")], isError: true)
+        }
+
+        let includeSymbols = args["include_symbols"]?.boolValue ?? false
+
+        // Get dependency information
+        let dependencies = try await dependencyService.getDependencies(at: projectPath)
+
+        var response = "# Project Dependencies\n\n"
+        response += "**Package:** \(dependencies.packageName)\n\n"
+
+        // List external dependencies
+        response += "## External Dependencies\n\n"
+        if dependencies.dependencies.isEmpty {
+            response += "No external dependencies\n\n"
+        } else {
+            for dep in dependencies.dependencies {
+                response += "### \(dep.name)\n"
+                if let url = dep.url {
+                    response += "- URL: \(url)\n"
+                }
+                if let req = dep.requirement {
+                    response += "- Requirement: \(req)\n"
+                }
+                if let resolved = dependencies.resolvedVersions[dep.name.lowercased()] {
+                    if let version = resolved.version {
+                        response += "- Resolved Version: \(version)\n"
+                    } else if let branch = resolved.branch {
+                        response += "- Branch: \(branch)\n"
+                    }
+                    response += "- Revision: \(resolved.revision.prefix(8))\n"
+                }
+                response += "\n"
+            }
+        }
+
+        // List targets and their dependencies
+        response += "## Targets\n\n"
+        for target in dependencies.targets {
+            response += "### \(target.name)"
+            if target.type != "regular" {
+                response += " (\(target.type))"
+            }
+            response += "\n"
+
+            if target.dependencies.isEmpty {
+                response += "- No dependencies\n"
+            } else {
+                response += "- Dependencies:\n"
+                for dep in target.dependencies {
+                    var depStr = "  - \(dep.name)"
+                    if let pkg = dep.package {
+                        depStr += " (from \(pkg))"
+                    }
+                    depStr += " [\(dep.kind)]"
+                    response += "\(depStr)\n"
+                }
+            }
+            response += "\n"
+        }
+
+        // Include symbols if requested
+        if includeSymbols {
+            response += "## Dependency Symbols\n\n"
+            response += "Extracting symbols from dependencies (this may take a moment)...\n\n"
+
+            let dependencySymbols = try await dependencyService.extractDependencySymbols(
+                at: projectPath,
+                minimumAccessLevel: .public
+            )
+
+            if dependencySymbols.isEmpty {
+                response += "No dependency symbols extracted. Dependencies may need to be built first.\n\n"
+            } else {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+                for (moduleName, symbols) in dependencySymbols.sorted(by: { $0.key < $1.key }) {
+                    response += "### \(moduleName) (\(symbols.count) public symbols)\n\n"
+
+                    // Show summary of symbol types
+                    let typeCount = symbols.filter { $0.kind == .struct || $0.kind == .class || $0.kind == .enum || $0.kind == .protocol || $0.kind == .actor }.count
+                    let funcCount = symbols.filter { $0.kind == .func }.count
+                    let propCount = symbols.filter { $0.kind == .var || $0.kind == .let }.count
+
+                    response += "Types: \(typeCount), Functions: \(funcCount), Properties: \(propCount)\n\n"
+
+                    // List the symbols
+                    let jsonData = try encoder.encode(symbols)
+                    let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
+                    response += "\(jsonString)\n\n"
+                }
+            }
+        }
+
+        return .init(content: [.text(response)], isError: false)
     }
 
     private func handleGetSymbolDocumentation(_ arguments: [String: Value]?) async throws -> CallTool.Result {

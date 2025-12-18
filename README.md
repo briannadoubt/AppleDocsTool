@@ -5,6 +5,7 @@ An MCP (Model Context Protocol) server that provides Claude Code with access to 
 ## Features
 
 - **Project Symbol Extraction** - Parse Swift Package Manager and Xcode projects to extract types, functions, and documentation
+- **Dependency Awareness** - Extract symbols from all package dependencies so Claude knows what's already available (prevents code duplication!)
 - **Apple Documentation Lookup** - Fetch up-to-date documentation from Apple's developer portal
 - **Local Documentation Fallback** - Use locally installed Xcode documentation when available
 - **Unified Search** - Search across your project symbols and Apple frameworks simultaneously
@@ -52,17 +53,34 @@ Or manually add to your MCP configuration (`~/.claude.json` or project `.claude/
 
 ### `get_project_symbols`
 
-Extract all symbols from a Swift project.
+Extract all symbols from a Swift project, optionally including dependency symbols.
 
 **Parameters:**
 - `project_path` (required): Path to Package.swift, .xcodeproj, or .xcworkspace
 - `target` (optional): Specific target to analyze
 - `minimum_access_level` (optional): "public", "internal", or "private" (default: "public")
+- `include_dependencies` (optional): Include symbols from all package dependencies (default: false)
 
 **Example:**
 ```
-Get all public symbols from my project at /Users/me/MyApp
+Get all public symbols from my project at /Users/me/MyApp, including dependencies
 ```
+
+### `get_project_dependencies`
+
+List all dependencies for a Swift package with versions and optionally extract their symbols.
+
+**Parameters:**
+- `project_path` (required): Path to Package.swift or directory containing it
+- `include_symbols` (optional): Extract public symbols from each dependency (default: false)
+
+**Example:**
+```
+What dependencies does my project at /Users/me/MyApp have?
+Show me all the APIs available from my project's dependencies
+```
+
+**Why This Matters:** When Claude knows what's in your dependencies, it won't accidentally reimplement functionality that already exists. For example, if you have Alamofire as a dependency, Claude will use it instead of writing custom networking code.
 
 ### `get_symbol_documentation`
 
@@ -160,6 +178,7 @@ AppleDocsTool/
     │   └── Project.swift          # Project configuration
     └── Services/
         ├── SymbolGraphService.swift   # swift-symbolgraph-extract wrapper
+        ├── DependencyService.swift    # Package dependency analysis
         ├── SPMParser.swift            # Package.swift parser
         ├── XcodeProjectParser.swift   # .xcodeproj parser
         ├── AppleDocsService.swift     # Apple web docs fetcher
