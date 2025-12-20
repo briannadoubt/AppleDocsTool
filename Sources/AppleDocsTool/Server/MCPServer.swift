@@ -113,24 +113,28 @@ final class AppleDocsToolServer: @unchecked Sendable {
             ),
             Tool(
                 name: "lookup_apple_api",
-                description: "Fetch official Apple documentation for system frameworks (SwiftUI, Foundation, UIKit, etc.)",
+                description: "Fetch official Apple documentation for system frameworks. Note: Works best with symbol names (e.g., 'Chart', 'View'), not article URLs. Articles/tutorials may not be available via the JSON API.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
                         "framework": .object([
                             "type": .string("string"),
-                            "description": .string("Framework name (e.g., SwiftUI, Foundation, UIKit, Combine)")
+                            "description": .string("Framework name (e.g., SwiftUI, Foundation, UIKit, Charts, Combine)")
                         ]),
                         "symbol": .object([
                             "type": .string("string"),
-                            "description": .string("Specific symbol to look up (optional, returns framework overview if not specified)")
+                            "description": .string("Specific symbol to look up (e.g., 'Chart', 'View', 'URLSession'). Use symbol names, not article titles.")
+                        ]),
+                        "url": .object([
+                            "type": .string("string"),
+                            "description": .string("Full Apple documentation URL (alternative to framework+symbol)")
                         ]),
                         "use_local": .object([
                             "type": .string("boolean"),
-                            "description": .string("Prefer local Xcode docs over web (default: true, falls back to web)")
+                            "description": .string("Prefer local Xcode docs over web (default: true)")
                         ])
                     ]),
-                    "required": .array([.string("framework")])
+                    "required": .array([])
                 ])
             ),
             Tool(
@@ -501,9 +505,34 @@ final class AppleDocsToolServer: @unchecked Sendable {
     }
 
     private func handleLookupAppleAPI(_ arguments: [String: Value]?) async throws -> CallTool.Result {
-        guard let args = arguments,
-              let framework = args["framework"]?.stringValue else {
-            return .init(content: [.text("Missing required parameter: framework")], isError: true)
+        let args = arguments ?? [:]
+
+        // Option 1: Direct URL
+        if let urlString = args["url"]?.stringValue {
+            do {
+                let response = try await appleDocsService.fetchFromURL(urlString)
+                // Extract framework from URL for conversion
+                let pathComponents = urlString
+                    .replacingOccurrences(of: "https://developer.apple.com/documentation/", with: "")
+                    .components(separatedBy: "/")
+                let framework = pathComponents.first ?? "Unknown"
+
+                let documentation = await appleDocsService.convertToDocumentation(response, framework: framework)
+
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let jsonData = try encoder.encode(documentation)
+                let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+                return .init(content: [.text(jsonString)], isError: false)
+            } catch {
+                return .init(content: [.text("Error: \(error.localizedDescription)")], isError: true)
+            }
+        }
+
+        // Option 2: Framework + optional symbol
+        guard let framework = args["framework"]?.stringValue else {
+            return .init(content: [.text("Please provide either 'url' or 'framework' parameter")], isError: true)
         }
 
         let symbol = args["symbol"]?.stringValue
@@ -537,25 +566,33 @@ final class AppleDocsToolServer: @unchecked Sendable {
 
         // Fetch from web
         if let symbolPath = symbol {
-            let response = try await appleDocsService.fetchSymbolDocs(framework: framework, symbolPath: symbolPath)
-            let documentation = await appleDocsService.convertToDocumentation(response, framework: framework)
+            do {
+                let response = try await appleDocsService.fetchSymbolDocs(framework: framework, symbolPath: symbolPath)
+                let documentation = await appleDocsService.convertToDocumentation(response, framework: framework)
 
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let jsonData = try encoder.encode(documentation)
-            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let jsonData = try encoder.encode(documentation)
+                let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
 
-            return .init(content: [.text(jsonString)], isError: false)
+                return .init(content: [.text(jsonString)], isError: false)
+            } catch {
+                return .init(content: [.text("Error looking up '\(symbolPath)' in \(framework): \(error.localizedDescription)\n\nTip: Use symbol names like 'Chart' or 'View', not article URLs.")], isError: true)
+            }
         } else {
-            let response = try await appleDocsService.fetchFrameworkDocs(framework: framework)
-            let documentation = await appleDocsService.convertToDocumentation(response, framework: framework)
+            do {
+                let response = try await appleDocsService.fetchFrameworkDocs(framework: framework)
+                let documentation = await appleDocsService.convertToDocumentation(response, framework: framework)
 
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let jsonData = try encoder.encode(documentation)
-            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let jsonData = try encoder.encode(documentation)
+                let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
 
-            return .init(content: [.text(jsonString)], isError: false)
+                return .init(content: [.text(jsonString)], isError: false)
+            } catch {
+                return .init(content: [.text("Error looking up framework '\(framework)': \(error.localizedDescription)\n\nCommon frameworks: SwiftUI, Foundation, UIKit, Charts, Combine, CoreData")], isError: true)
+            }
         }
     }
 

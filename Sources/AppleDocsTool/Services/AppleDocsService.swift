@@ -54,8 +54,51 @@ actor AppleDocsService {
             return cached
         }
 
-        let urlString = "\(baseURL)/\(framework.lowercased())/\(normalizedPath).json"
-        guard let url = URL(string: urlString) else {
+        // Try multiple URL patterns since Apple's API is inconsistent
+        let urlsToTry = [
+            "\(baseURL)/\(framework.lowercased())/\(normalizedPath).json",
+            "\(baseURL)/\(normalizedPath).json",  // Sometimes path includes framework
+        ]
+
+        var lastError: Error = AppleDocsError.notFound(symbolPath)
+
+        for urlString in urlsToTry {
+            guard let url = URL(string: urlString) else { continue }
+
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+
+                guard let httpResponse = response as? HTTPURLResponse else { continue }
+
+                if httpResponse.statusCode == 200 {
+                    let docs = try JSONDecoder().decode(AppleDocsResponse.self, from: data)
+                    addToCache(key: cacheKey, value: docs)
+                    return docs
+                }
+            } catch {
+                lastError = error
+            }
+        }
+
+        throw lastError
+    }
+
+    /// Fetch documentation from a full Apple developer URL
+    /// e.g., "https://developer.apple.com/documentation/charts/chart"
+    func fetchFromURL(_ urlString: String) async throws -> AppleDocsResponse {
+        // Parse the URL to extract the documentation path
+        let path = urlString
+            .replacingOccurrences(of: "https://developer.apple.com/documentation/", with: "")
+            .replacingOccurrences(of: "http://developer.apple.com/documentation/", with: "")
+
+        let cacheKey = path.lowercased()
+        if let cached = cache[cacheKey] {
+            return cached
+        }
+
+        // Try the JSON API
+        let jsonURL = "\(baseURL)/\(path.lowercased()).json"
+        guard let url = URL(string: jsonURL) else {
             throw AppleDocsError.invalidURL(urlString)
         }
 
@@ -63,6 +106,11 @@ actor AppleDocsService {
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AppleDocsError.invalidResponse
+        }
+
+        if httpResponse.statusCode == 404 {
+            // This might be an article or tutorial, not a symbol
+            throw AppleDocsError.notFound("'\(path)' - This may be an article/tutorial which isn't available via the JSON API. Try looking up a specific symbol instead (e.g., 'Chart' instead of 'adding-interactivity-to-a-chart').")
         }
 
         guard httpResponse.statusCode == 200 else {
