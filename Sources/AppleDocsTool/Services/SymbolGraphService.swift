@@ -48,7 +48,17 @@ actor SymbolGraphService {
         process.standardError = errorPipe
 
         try process.run()
-        process.waitUntilExit()
+
+        // Timeout for symbol extraction (2 minutes)
+        let timeout: TimeInterval = 120
+        let startTime = Date()
+        while process.isRunning {
+            if Date().timeIntervalSince(startTime) > timeout {
+                process.terminate()
+                throw SymbolGraphError.extractionFailed("Symbol extraction timed out after \(Int(timeout)) seconds")
+            }
+            try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        }
 
         if process.terminationStatus != 0 {
             let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
@@ -93,7 +103,17 @@ actor SymbolGraphService {
         process.standardError = errorPipe
 
         try process.run()
-        process.waitUntilExit()
+
+        // Add timeout for build (5 minutes max)
+        let timeout: TimeInterval = 300
+        let startTime = Date()
+        while process.isRunning {
+            if Date().timeIntervalSince(startTime) > timeout {
+                process.terminate()
+                throw SymbolGraphError.buildFailed("Build timed out after \(Int(timeout)) seconds")
+            }
+            try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        }
 
         if process.terminationStatus != 0 {
             let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
@@ -114,7 +134,17 @@ actor SymbolGraphService {
         process.standardError = FileHandle.nullDevice
 
         try process.run()
-        process.waitUntilExit()
+
+        // Quick command - 10 second timeout
+        let timeout: TimeInterval = 10
+        let startTime = Date()
+        while process.isRunning {
+            if Date().timeIntervalSince(startTime) > timeout {
+                process.terminate()
+                throw SymbolGraphError.sdkNotFound
+            }
+            try await Task.sleep(nanoseconds: 50_000_000) // 50ms
+        }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -134,7 +164,18 @@ actor SymbolGraphService {
         process.standardError = FileHandle.nullDevice
 
         try process.run()
-        process.waitUntilExit()
+
+        // Quick command - 10 second timeout
+        let timeout: TimeInterval = 10
+        let startTime = Date()
+        while process.isRunning {
+            if Date().timeIntervalSince(startTime) > timeout {
+                process.terminate()
+                // Fall back to default
+                return "arm64-apple-macosx13.0"
+            }
+            try await Task.sleep(nanoseconds: 50_000_000) // 50ms
+        }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

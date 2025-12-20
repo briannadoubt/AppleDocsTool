@@ -165,7 +165,17 @@ actor DependencyService {
         process.standardError = errorPipe
 
         try process.run()
-        process.waitUntilExit()
+
+        // Add timeout (30 seconds for dump-package)
+        let timeout: TimeInterval = 30
+        let startTime = Date()
+        while process.isRunning {
+            if Date().timeIntervalSince(startTime) > timeout {
+                process.terminate()
+                throw DependencyError.invalidManifest
+            }
+            try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        }
 
         let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
 
@@ -333,7 +343,18 @@ actor DependencyService {
         process.standardError = errorPipe
 
         try process.run()
-        process.waitUntilExit()
+
+        // Add timeout for build (5 minutes max)
+        let timeout: TimeInterval = 300
+        let startTime = Date()
+        while process.isRunning {
+            if Date().timeIntervalSince(startTime) > timeout {
+                process.terminate()
+                // Don't throw - we still want to try extracting what we can
+                return
+            }
+            try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        }
 
         // Don't throw on build failure - we still want to try extracting what we can
     }

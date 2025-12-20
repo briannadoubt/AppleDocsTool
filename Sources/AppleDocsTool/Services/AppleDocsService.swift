@@ -4,6 +4,18 @@ import Foundation
 actor AppleDocsService {
     private var cache: [String: AppleDocsResponse] = [:]
     private let baseURL = "https://developer.apple.com/tutorials/data/documentation"
+    private let maxCacheSize = 100
+
+    private func addToCache(key: String, value: AppleDocsResponse) {
+        // Simple cache eviction: clear half when limit reached
+        if cache.count >= maxCacheSize {
+            let keysToRemove = Array(cache.keys.prefix(maxCacheSize / 2))
+            for key in keysToRemove {
+                cache.removeValue(forKey: key)
+            }
+        }
+        cache[key] = value
+    }
 
     /// Fetch documentation for a framework
     func fetchFrameworkDocs(framework: String) async throws -> AppleDocsResponse {
@@ -29,7 +41,7 @@ actor AppleDocsService {
         }
 
         let docs = try JSONDecoder().decode(AppleDocsResponse.self, from: data)
-        cache[cacheKey] = docs
+        addToCache(key: cacheKey, value: docs)
         return docs
     }
 
@@ -58,7 +70,7 @@ actor AppleDocsService {
         }
 
         let docs = try JSONDecoder().decode(AppleDocsResponse.self, from: data)
-        cache[cacheKey] = docs
+        addToCache(key: cacheKey, value: docs)
         return docs
     }
 
