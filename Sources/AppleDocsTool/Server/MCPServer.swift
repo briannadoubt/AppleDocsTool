@@ -231,6 +231,30 @@ final class AppleDocsToolServer: @unchecked Sendable {
         }
     }
 
+    // MARK: - Helper Methods
+
+    /// Extract symbols using the appropriate method based on project type
+    private func extractSymbols(
+        from project: Project,
+        targetName: String,
+        minimumAccessLevel: AccessLevel
+    ) async throws -> [Symbol] {
+        switch project.type {
+        case .xcode, .xcworkspace:
+            return try await symbolGraphService.extractFromXcodeProject(
+                at: project.path,
+                targetName: targetName,
+                minimumAccessLevel: minimumAccessLevel
+            )
+        case .spm:
+            return try await symbolGraphService.extractFromPackage(
+                at: project.path,
+                targetName: targetName,
+                minimumAccessLevel: minimumAccessLevel
+            )
+        }
+    }
+
     // MARK: - Tool Handlers
 
     private func handleGetProjectSymbols(_ arguments: [String: Value]?) async throws -> CallTool.Result {
@@ -279,8 +303,8 @@ final class AppleDocsToolServer: @unchecked Sendable {
         // Extract project symbols
         for target in targetsToAnalyze {
             do {
-                let symbols = try await symbolGraphService.extractFromPackage(
-                    at: project.path,
+                let symbols = try await extractSymbols(
+                    from: project,
                     targetName: target.moduleName,
                     minimumAccessLevel: minimumAccessLevel
                 )
@@ -453,8 +477,8 @@ final class AppleDocsToolServer: @unchecked Sendable {
 
         // Search for the symbol
         for target in project.targets {
-            let symbols = try await symbolGraphService.extractFromPackage(
-                at: project.path,
+            let symbols = try await extractSymbols(
+                from: project,
                 targetName: target.moduleName,
                 minimumAccessLevel: .private
             )
@@ -556,8 +580,8 @@ final class AppleDocsToolServer: @unchecked Sendable {
 
             for target in project.targets {
                 do {
-                    let symbols = try await symbolGraphService.extractFromPackage(
-                        at: project.path,
+                    let symbols = try await extractSymbols(
+                        from: project,
                         targetName: target.moduleName,
                         minimumAccessLevel: .public
                     )
@@ -772,8 +796,8 @@ final class AppleDocsToolServer: @unchecked Sendable {
 
         for target in project.targets {
             do {
-                let symbols = try await symbolGraphService.extractFromPackage(
-                    at: project.path,
+                let symbols = try await extractSymbols(
+                    from: project,
                     targetName: target.moduleName,
                     minimumAccessLevel: .public
                 )
@@ -784,7 +808,10 @@ final class AppleDocsToolServer: @unchecked Sendable {
         }
 
         if allSymbols.isEmpty {
-            response += "_No public symbols found. The project may need to be built first._\n\n"
+            let buildHint = project.type == .spm
+                ? "Run `swift build` first."
+                : "Build the project in Xcode first."
+            response += "_No public symbols found. \(buildHint)_\n\n"
         } else {
             // Group by kind
             let structs = allSymbols.filter { $0.kind == .struct }

@@ -92,6 +92,93 @@ actor SymbolGraphService {
         )
     }
 
+    /// Extract symbols from a built Xcode project
+    func extractFromXcodeProject(
+        at projectPath: String,
+        targetName: String,
+        minimumAccessLevel: AccessLevel = .public
+    ) async throws -> [Symbol] {
+        // Find DerivedData for this project
+        let searchPaths = try findXcodeBuildPaths(projectPath: projectPath, targetName: targetName)
+
+        if searchPaths.isEmpty {
+            throw SymbolGraphError.extractionFailed("No Xcode build products found. Please build the project in Xcode first.")
+        }
+
+        return try await extractSymbols(
+            moduleName: targetName,
+            searchPaths: searchPaths,
+            minimumAccessLevel: minimumAccessLevel
+        )
+    }
+
+    /// Find Xcode DerivedData build paths for a project
+    private func findXcodeBuildPaths(projectPath: String, targetName: String) throws -> [String] {
+        var searchPaths: [String] = []
+
+        // Get project name from path
+        let projectName: String
+        if projectPath.hasSuffix(".xcodeproj") {
+            projectName = (projectPath as NSString).lastPathComponent.replacingOccurrences(of: ".xcodeproj", with: "")
+        } else if projectPath.hasSuffix(".xcworkspace") {
+            projectName = (projectPath as NSString).lastPathComponent.replacingOccurrences(of: ".xcworkspace", with: "")
+        } else {
+            // Try to find project in directory
+            let contents = try fileManager.contentsOfDirectory(atPath: projectPath)
+            if let proj = contents.first(where: { $0.hasSuffix(".xcodeproj") }) {
+                projectName = proj.replacingOccurrences(of: ".xcodeproj", with: "")
+            } else if let ws = contents.first(where: { $0.hasSuffix(".xcworkspace") }) {
+                projectName = ws.replacingOccurrences(of: ".xcworkspace", with: "")
+            } else {
+                projectName = (projectPath as NSString).lastPathComponent
+            }
+        }
+
+        // Default DerivedData location
+        let homeDir = fileManager.homeDirectoryForCurrentUser.path
+        let derivedDataPath = "\(homeDir)/Library/Developer/Xcode/DerivedData"
+
+        if fileManager.fileExists(atPath: derivedDataPath) {
+            // Find project's DerivedData folder (format: ProjectName-randomhash)
+            let contents = try? fileManager.contentsOfDirectory(atPath: derivedDataPath)
+            for folder in contents ?? [] {
+                if folder.hasPrefix(projectName) || folder.lowercased().hasPrefix(projectName.lowercased()) {
+                    let buildProductsPath = "\(derivedDataPath)/\(folder)/Build/Products"
+                    if fileManager.fileExists(atPath: buildProductsPath) {
+                        // Add all configuration folders (Debug-iphonesimulator, Release-iphoneos, etc.)
+                        if let configs = try? fileManager.contentsOfDirectory(atPath: buildProductsPath) {
+                            for config in configs {
+                                let configPath = "\(buildProductsPath)/\(config)"
+                                searchPaths.append(configPath)
+
+                                // Also check for framework modules inside
+                                let frameworkPath = "\(configPath)/\(targetName).framework/Modules"
+                                if fileManager.fileExists(atPath: frameworkPath) {
+                                    searchPaths.append(frameworkPath)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also check for build folder next to project (custom DerivedData location)
+        let projectDir = projectPath.hasSuffix(".xcodeproj") || projectPath.hasSuffix(".xcworkspace")
+            ? (projectPath as NSString).deletingLastPathComponent
+            : projectPath
+        let localBuild = "\(projectDir)/build"
+        if fileManager.fileExists(atPath: localBuild) {
+            if let configs = try? fileManager.contentsOfDirectory(atPath: localBuild) {
+                for config in configs {
+                    searchPaths.append("\(localBuild)/\(config)")
+                }
+            }
+        }
+
+        return searchPaths
+    }
+
     private func buildPackage(at path: String) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/swift")
