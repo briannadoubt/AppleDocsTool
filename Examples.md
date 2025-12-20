@@ -89,24 +89,39 @@ Found 156 symbols (including internal):
 
 ## Searching Across Everything
 
-### Search Project + Apple Frameworks
+### Fuzzy Search with Ranking
 
 ```
 You: Search for anything related to "Button" in my project and SwiftUI
 
 Claude: [uses search_symbols with query="Button", project_path="~/Developer/MyApp", frameworks=["SwiftUI"]]
 
-Found 12 matching symbols:
+Found 15 matching symbols (3 exact, 5 prefix, 4 contains, 3 fuzzy):
 
-From your project:
-- CustomButton: View (Sources/Components/CustomButton.swift)
-- ButtonStyle (Sources/Styles/ButtonStyles.swift)
+From your project (score 1.0 - exact match):
+- struct Button: View (Sources/Components/Button.swift)
 
-From SwiftUI:
-- struct Button<Label>: View
-- protocol ButtonStyle
-- struct BorderedButtonStyle
-- struct PlainButtonStyle
+From SwiftUI (score 0.95 - prefix):
+- struct ButtonStyle
+- struct ButtonStyleConfiguration
+
+From project (score 0.7 - contains):
+- CustomButtonView
+- PrimaryButtonStyle
+...
+```
+
+### CamelCase Search
+
+```
+You: Find all ViewModels using "VM"
+
+Claude: [uses search_symbols with query="VM", project_path="~/Developer/MyApp"]
+
+Found 8 matching symbols (8 camelCase):
+- HomeViewModel (score 0.85)
+- UserProfileViewModel (score 0.85)
+- SettingsViewModel (score 0.85)
 ...
 ```
 
@@ -159,14 +174,93 @@ Found projects in workspace:
 ...
 ```
 
+## Understanding Dependencies
+
+### Get Project Overview
+
+```
+You: Give me an overview of this project at ~/Developer/MyApp
+
+Claude: [uses get_project_summary with project_path="~/Developer/MyApp"]
+
+# Project Summary
+
+**Name:** MyApp
+**Type:** Swift Package
+
+## Targets (3)
+- MyApp (module: MyApp)
+- MyAppTests (dependencies: MyApp)
+- MyAppCLI (dependencies: MyApp)
+
+## External Dependencies (4)
+- Alamofire (v5.8.1)
+- swift-argument-parser (v1.3.0)
+- KeychainAccess (v4.2.2)
+- SwiftLint (v0.54.0)
+
+## Key Types
+- Structs: 12 (AppConfig, User, AuthToken, ...)
+- Classes: 5 (NetworkManager, DatabaseService, ...)
+- Protocols: 8 (APIEndpoint, Cacheable, ...)
+- Enums: 6 (AppError, NetworkState, ...)
+```
+
+### Fetch Dependency Documentation
+
+```
+You: How do I use Alamofire? Get me its documentation.
+
+Claude: [uses get_dependency_docs with project_path="~/Developer/MyApp", dependency_name="Alamofire"]
+
+# Alamofire
+
+**Description:** Elegant HTTP Networking in Swift
+**URL:** https://github.com/Alamofire/Alamofire
+**Stars:** 40,234
+**License:** MIT License
+**Topics:** swift, networking, http, urlsession
+
+---
+
+## README
+
+Alamofire is an HTTP networking library written in Swift.
+
+### Features
+- Chainable Request / Response Methods
+- Swift Concurrency Support
+- URL / JSON Parameter Encoding
+...
+```
+
+### Get Docs from GitHub URL
+
+```
+You: Show me the documentation for https://github.com/kishikawakatsumi/KeychainAccess
+
+Claude: [uses get_dependency_docs with github_url="https://github.com/kishikawakatsumi/KeychainAccess"]
+
+# KeychainAccess
+
+**Description:** Simple Swift wrapper for Keychain...
+...
+```
+
 ## Tips for Best Results
 
-1. **Be specific with symbol names** - Use fully qualified names like `MyModule.MyClass.myMethod`
+1. **Start with get_project_summary** - When working on an unfamiliar project, use this first to understand the structure
 
-2. **Build your project first** - Symbol extraction works best after a successful build
+2. **Check dependencies before implementing** - Use get_project_dependencies to see what libraries are already available
 
-3. **Use appropriate access levels** - Default is `public`; use `internal` to see more
+3. **Use get_dependency_docs for library usage** - When you need to use a dependency, fetch its README to understand the API
 
-4. **Framework names are case-sensitive** - Use `SwiftUI` not `swiftui`
+4. **Be specific with symbol names** - Use fully qualified names like `MyModule.MyClass.myMethod`
 
-5. **Combine tools** - Search first, then get detailed docs for what you find
+5. **Build your project first** - Symbol extraction works best after a successful build
+
+6. **Use appropriate access levels** - Default is `public`; use `internal` to see more
+
+7. **Framework names are case-sensitive** - Use `SwiftUI` not `swiftui`
+
+8. **Use fuzzy search for exploration** - Search with partial names or camelCase abbreviations like "VM" for ViewModel

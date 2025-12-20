@@ -10,6 +10,8 @@ final class AppleDocsToolServer: @unchecked Sendable {
     private let appleDocsService = AppleDocsService()
     private let localDocsService = LocalDocsService()
     private let dependencyService = DependencyService()
+    private let gitHubDocsService = GitHubDocsService()
+    private let searchService = SearchService()
 
     init() {
         self.server = Server(
@@ -133,13 +135,13 @@ final class AppleDocsToolServer: @unchecked Sendable {
             ),
             Tool(
                 name: "search_symbols",
-                description: "Search for symbols across a Swift project and/or Apple frameworks",
+                description: "Search for symbols across a Swift project and/or Apple frameworks with fuzzy matching. Supports exact, prefix, camelCase, contains, and fuzzy matches with relevance ranking.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
                         "query": .object([
                             "type": .string("string"),
-                            "description": .string("Search query (symbol name or partial match)")
+                            "description": .string("Search query - supports exact names, prefixes, camelCase (e.g., 'VM' finds 'ViewModel'), and fuzzy matching")
                         ]),
                         "project_path": .object([
                             "type": .string("string"),
@@ -149,9 +151,49 @@ final class AppleDocsToolServer: @unchecked Sendable {
                             "type": .string("array"),
                             "description": .string("Apple frameworks to search (optional, searches common frameworks by default)"),
                             "items": .object(["type": .string("string")])
+                        ]),
+                        "max_results": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum number of results to return (default: 50)")
                         ])
                     ]),
                     "required": .array([.string("query")])
+                ])
+            ),
+            Tool(
+                name: "get_dependency_docs",
+                description: "Fetch documentation (README, guides) from a dependency's GitHub repository. Use this to understand how to use a third-party library.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "project_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to Swift project (to look up dependency URLs from Package.resolved)")
+                        ]),
+                        "dependency_name": .object([
+                            "type": .string("string"),
+                            "description": .string("Name of the dependency (e.g., 'Alamofire', 'swift-argument-parser')")
+                        ]),
+                        "github_url": .object([
+                            "type": .string("string"),
+                            "description": .string("Direct GitHub URL (alternative to project_path + dependency_name)")
+                        ])
+                    ]),
+                    "required": .array([])
+                ])
+            ),
+            Tool(
+                name: "get_project_summary",
+                description: "Get a quick overview of a Swift project: targets, dependencies, key types, and structure. Use this first when starting work on an unfamiliar project.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "project_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to Package.swift, .xcodeproj, or directory containing them")
+                        ])
+                    ]),
+                    "required": .array([.string("project_path")])
                 ])
             )
         ]
@@ -174,6 +216,12 @@ final class AppleDocsToolServer: @unchecked Sendable {
 
             case "search_symbols":
                 return try await handleSearchSymbols(params.arguments)
+
+            case "get_dependency_docs":
+                return try await handleGetDependencyDocs(params.arguments)
+
+            case "get_project_summary":
+                return try await handleGetProjectSummary(params.arguments)
 
             default:
                 return .init(content: [.text("Unknown tool: \(params.name)")], isError: true)
@@ -493,7 +541,8 @@ final class AppleDocsToolServer: @unchecked Sendable {
             return .init(content: [.text("Missing required parameter: query")], isError: true)
         }
 
-        var results: [SearchResult] = []
+        let maxResults = args["max_results"]?.intValue ?? 50
+        var resultSets: [[SearchService.ScoredResult]] = []
 
         // Search in project if specified
         if let projectPath = args["project_path"]?.stringValue {
@@ -513,21 +562,13 @@ final class AppleDocsToolServer: @unchecked Sendable {
                         minimumAccessLevel: .public
                     )
 
-                    let matching = symbols.filter {
-                        $0.name.localizedCaseInsensitiveContains(query) ||
-                        $0.fullyQualifiedName.localizedCaseInsensitiveContains(query)
-                    }
-
-                    for symbol in matching {
-                        results.append(SearchResult(
-                            name: symbol.name,
-                            fullyQualifiedName: symbol.fullyQualifiedName,
-                            kind: symbol.kind.rawValue,
-                            source: "project:\(project.name)",
-                            declaration: symbol.declaration,
-                            documentation: symbol.documentation
-                        ))
-                    }
+                    let projectResults = await searchService.search(
+                        query: query,
+                        symbols: symbols,
+                        source: "project:\(project.name)",
+                        maxResults: maxResults
+                    )
+                    resultSets.append(projectResults)
                 } catch {
                     continue
                 }
@@ -545,40 +586,245 @@ final class AppleDocsToolServer: @unchecked Sendable {
         for framework in frameworksToSearch {
             do {
                 let appleResults = try await appleDocsService.searchSymbol(query: query, in: framework)
-                for doc in appleResults.prefix(10) {
-                    results.append(SearchResult(
-                        name: doc.title,
-                        fullyQualifiedName: doc.identifier,
-                        kind: "apple-symbol",
-                        source: "apple:\(framework)",
-                        declaration: doc.declaration,
-                        documentation: doc.abstract
-                    ))
-                }
+                let scoredResults = await searchService.searchAppleDocs(
+                    query: query,
+                    docs: appleResults,
+                    framework: framework,
+                    maxResults: 20
+                )
+                resultSets.append(scoredResults)
             } catch {
                 continue
             }
         }
 
-        if results.isEmpty {
+        // Merge and rank all results
+        let mergedResults = await searchService.mergeResults(resultSets, maxResults: maxResults)
+
+        if mergedResults.isEmpty {
             return .init(content: [.text("No symbols found matching: \(query)")], isError: false)
         }
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let jsonData = try encoder.encode(results)
+        let jsonData = try encoder.encode(mergedResults)
         let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
 
-        return .init(content: [.text("Found \(results.count) matching symbols:\n\n\(jsonString)")], isError: false)
-    }
-}
+        // Group results by match type for summary
+        let matchTypes = Dictionary(grouping: mergedResults, by: { $0.matchType })
+        var summary = "Found \(mergedResults.count) matching symbols"
+        let typeCounts = matchTypes.map { "\($0.value.count) \($0.key)" }.joined(separator: ", ")
+        summary += " (\(typeCounts)):\n\n"
 
-// Helper for search results
-private struct SearchResult: Codable {
-    let name: String
-    let fullyQualifiedName: String
-    let kind: String
-    let source: String
-    let declaration: String?
-    let documentation: String?
+        return .init(content: [.text(summary + jsonString)], isError: false)
+    }
+
+    private func handleGetDependencyDocs(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        let args = arguments ?? [:]
+
+        // Option 1: Direct GitHub URL
+        if let githubURL = args["github_url"]?.stringValue {
+            let docs = try await gitHubDocsService.fetchDocs(from: githubURL)
+            return formatGitHubDocs(docs)
+        }
+
+        // Option 2: Look up from project dependencies
+        guard let projectPath = args["project_path"]?.stringValue,
+              let dependencyName = args["dependency_name"]?.stringValue else {
+            return .init(content: [.text("Please provide either 'github_url' or both 'project_path' and 'dependency_name'")], isError: true)
+        }
+
+        // Get dependencies to find the URL
+        let dependencies = try await dependencyService.getDependencies(at: projectPath)
+
+        // Find the dependency
+        let searchName = dependencyName.lowercased()
+        var foundURL: String?
+
+        // Check in resolved versions
+        for (name, resolved) in dependencies.resolvedVersions {
+            if name.lowercased().contains(searchName) || searchName.contains(name.lowercased()) {
+                foundURL = resolved.repositoryURL
+                break
+            }
+        }
+
+        // Check in dependencies list
+        if foundURL == nil {
+            for dep in dependencies.dependencies {
+                if dep.name.lowercased().contains(searchName) || searchName.contains(dep.name.lowercased()) {
+                    foundURL = dep.url
+                    break
+                }
+            }
+        }
+
+        guard let url = foundURL else {
+            return .init(content: [.text("Dependency '\(dependencyName)' not found in project. Available dependencies: \(dependencies.dependencies.map { $0.name }.joined(separator: ", "))")], isError: true)
+        }
+
+        let docs = try await gitHubDocsService.fetchDocs(from: url)
+        return formatGitHubDocs(docs)
+    }
+
+    private func formatGitHubDocs(_ docs: GitHubDocsService.GitHubDocs) -> CallTool.Result {
+        var response = "# \(docs.repositoryName)\n\n"
+
+        if let description = docs.description {
+            response += "**Description:** \(description)\n\n"
+        }
+
+        response += "**URL:** \(docs.repositoryURL)\n"
+
+        if let stars = docs.stars {
+            response += "**Stars:** \(stars)\n"
+        }
+
+        if let license = docs.license {
+            response += "**License:** \(license)\n"
+        }
+
+        if !docs.topics.isEmpty {
+            response += "**Topics:** \(docs.topics.joined(separator: ", "))\n"
+        }
+
+        response += "\n---\n\n"
+
+        if let readme = docs.readme {
+            response += "## README\n\n\(readme)\n\n"
+        }
+
+        for docFile in docs.documentationFiles {
+            response += "---\n\n## \(docFile.name)\n\n\(docFile.content)\n\n"
+        }
+
+        return .init(content: [.text(response)], isError: false)
+    }
+
+    private func handleGetProjectSummary(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let projectPath = args["project_path"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: project_path")], isError: true)
+        }
+
+        var response = "# Project Summary\n\n"
+
+        // Detect project type and parse
+        let project: Project
+        let isSPM: Bool
+        if projectPath.hasSuffix(".xcodeproj") || projectPath.hasSuffix(".xcworkspace") ||
+           FileManager.default.fileExists(atPath: "\(projectPath)/project.pbxproj") {
+            project = try await xcodeParser.parseProject(at: projectPath)
+            isSPM = false
+        } else if FileManager.default.fileExists(atPath: "\(projectPath)/Package.swift") ||
+                  projectPath.hasSuffix("Package.swift") {
+            project = try await spmParser.parsePackage(at: projectPath)
+            isSPM = true
+        } else {
+            let contents = try FileManager.default.contentsOfDirectory(atPath: projectPath)
+            if contents.contains("Package.swift") {
+                project = try await spmParser.parsePackage(at: projectPath)
+                isSPM = true
+            } else if contents.first(where: { $0.hasSuffix(".xcodeproj") || $0.hasSuffix(".xcworkspace") }) != nil {
+                project = try await xcodeParser.parseProject(at: projectPath)
+                isSPM = false
+            } else {
+                return .init(content: [.text("Could not detect project type at: \(projectPath)")], isError: true)
+            }
+        }
+
+        response += "**Name:** \(project.name)\n"
+        response += "**Type:** \(project.type.rawValue)\n"
+        response += "**Path:** \(project.path)\n\n"
+
+        // Targets
+        response += "## Targets (\(project.targets.count))\n\n"
+        for target in project.targets {
+            response += "### \(target.name)\n"
+            response += "- Module: `\(target.moduleName)`\n"
+            if !target.dependencies.isEmpty {
+                response += "- Dependencies: \(target.dependencies.joined(separator: ", "))\n"
+            }
+            response += "\n"
+        }
+
+        // Dependencies (for SPM projects)
+        if isSPM {
+            let dependencies = try await dependencyService.getDependencies(at: project.path)
+
+            if !dependencies.dependencies.isEmpty {
+                response += "## External Dependencies (\(dependencies.dependencies.count))\n\n"
+                for dep in dependencies.dependencies {
+                    response += "- **\(dep.name)**"
+                    if let resolved = dependencies.resolvedVersions[dep.name.lowercased()],
+                       let version = resolved.version {
+                        response += " (v\(version))"
+                    }
+                    response += "\n"
+                }
+                response += "\n"
+            }
+        }
+
+        // Key symbols summary
+        response += "## Key Types\n\n"
+        var allSymbols: [Symbol] = []
+
+        for target in project.targets {
+            do {
+                let symbols = try await symbolGraphService.extractFromPackage(
+                    at: project.path,
+                    targetName: target.moduleName,
+                    minimumAccessLevel: .public
+                )
+                allSymbols.append(contentsOf: symbols)
+            } catch {
+                continue
+            }
+        }
+
+        if allSymbols.isEmpty {
+            response += "_No public symbols found. The project may need to be built first._\n\n"
+        } else {
+            // Group by kind
+            let structs = allSymbols.filter { $0.kind == .struct }
+            let classes = allSymbols.filter { $0.kind == .class }
+            let protocols = allSymbols.filter { $0.kind == .protocol }
+            let enums = allSymbols.filter { $0.kind == .enum }
+            let actors = allSymbols.filter { $0.kind == .actor }
+            let functions = allSymbols.filter { $0.kind == .func }
+
+            response += "| Category | Count | Examples |\n"
+            response += "|----------|-------|----------|\n"
+
+            if !structs.isEmpty {
+                let examples = structs.prefix(3).map { $0.name }.joined(separator: ", ")
+                response += "| Structs | \(structs.count) | \(examples) |\n"
+            }
+            if !classes.isEmpty {
+                let examples = classes.prefix(3).map { $0.name }.joined(separator: ", ")
+                response += "| Classes | \(classes.count) | \(examples) |\n"
+            }
+            if !protocols.isEmpty {
+                let examples = protocols.prefix(3).map { $0.name }.joined(separator: ", ")
+                response += "| Protocols | \(protocols.count) | \(examples) |\n"
+            }
+            if !enums.isEmpty {
+                let examples = enums.prefix(3).map { $0.name }.joined(separator: ", ")
+                response += "| Enums | \(enums.count) | \(examples) |\n"
+            }
+            if !actors.isEmpty {
+                let examples = actors.prefix(3).map { $0.name }.joined(separator: ", ")
+                response += "| Actors | \(actors.count) | \(examples) |\n"
+            }
+            if !functions.isEmpty {
+                let examples = functions.prefix(3).map { $0.name }.joined(separator: ", ")
+                response += "| Functions | \(functions.count) | \(examples) |\n"
+            }
+
+            response += "\n**Total public symbols:** \(allSymbols.count)\n"
+        }
+
+        return .init(content: [.text(response)], isError: false)
+    }
 }

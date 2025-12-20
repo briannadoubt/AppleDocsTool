@@ -6,9 +6,11 @@ An MCP (Model Context Protocol) server that provides Claude Code with access to 
 
 - **Project Symbol Extraction** - Parse Swift Package Manager and Xcode projects to extract types, functions, and documentation
 - **Dependency Awareness** - Extract symbols from all package dependencies so Claude knows what's already available (prevents code duplication!)
+- **GitHub Documentation** - Fetch README and documentation from dependency GitHub repositories
 - **Apple Documentation Lookup** - Fetch up-to-date documentation from Apple's developer portal
 - **Local Documentation Fallback** - Use locally installed Xcode documentation when available
-- **Unified Search** - Search across your project symbols and Apple frameworks simultaneously
+- **Fuzzy Search** - Search across project symbols and Apple frameworks with intelligent matching (exact, prefix, camelCase, fuzzy)
+- **Project Summary** - Quick overview of project structure, dependencies, and key types
 
 ## Requirements
 
@@ -112,17 +114,61 @@ Look up Foundation's URLSession documentation
 
 ### `search_symbols`
 
-Search across project symbols and Apple frameworks.
+Search across project symbols and Apple frameworks with fuzzy matching and relevance ranking.
 
 **Parameters:**
-- `query` (required): Search query
+- `query` (required): Search query - supports exact names, prefixes, camelCase (e.g., "VM" finds "ViewModel"), and fuzzy matching
 - `project_path` (optional): Path to Swift project to include
 - `frameworks` (optional): Apple frameworks to search (default: Foundation, SwiftUI, UIKit, Combine)
+- `max_results` (optional): Maximum results to return (default: 50)
+
+**Match Types (in priority order):**
+- `exact` - Perfect match
+- `prefix` - Query matches start of symbol name
+- `camelCase` - Query matches capital letters (e.g., "NSO" finds "NSObject")
+- `contains` - Query found within symbol name
+- `wordBoundary` - Query matches word start
+- `fuzzy` - Similar spelling (Levenshtein distance)
+- `subsequence` - All query characters appear in order
 
 **Example:**
 ```
 Search for "Button" in SwiftUI and my project at /Users/me/MyApp
+Search for "VM" to find all ViewModels
 ```
+
+### `get_dependency_docs`
+
+Fetch README and documentation from a dependency's GitHub repository. Use this to understand how to use a third-party library.
+
+**Parameters:**
+- `github_url` (optional): Direct GitHub URL to the repository
+- `project_path` (optional): Path to Swift project (to look up dependency URLs)
+- `dependency_name` (optional): Name of the dependency to look up
+
+**Example:**
+```
+Get the documentation for Alamofire from my project's dependencies
+Fetch the README from https://github.com/Alamofire/Alamofire
+```
+
+### `get_project_summary`
+
+Get a quick overview of a Swift project including targets, dependencies, and key public types. **Use this first when starting work on an unfamiliar project.**
+
+**Parameters:**
+- `project_path` (required): Path to Package.swift, .xcodeproj, or directory
+
+**Example:**
+```
+Give me an overview of the project at /Users/me/MyApp
+```
+
+**Output includes:**
+- Project name and type
+- All targets with their dependencies
+- External dependencies with versions
+- Key public types (structs, classes, protocols, enums)
 
 ## How It Works
 
@@ -171,7 +217,7 @@ AppleDocsTool/
 └── Sources/AppleDocsTool/
     ├── main.swift                 # Entry point
     ├── Server/
-    │   └── MCPServer.swift        # MCP server & tool handlers
+    │   └── MCPServer.swift        # MCP server & tool handlers (7 tools)
     ├── Models/
     │   ├── Symbol.swift           # Swift symbol representation
     │   ├── Documentation.swift    # Apple docs models
@@ -179,6 +225,8 @@ AppleDocsTool/
     └── Services/
         ├── SymbolGraphService.swift   # swift-symbolgraph-extract wrapper
         ├── DependencyService.swift    # Package dependency analysis
+        ├── GitHubDocsService.swift    # GitHub README/docs fetcher
+        ├── SearchService.swift        # Fuzzy search & ranking
         ├── SPMParser.swift            # Package.swift parser
         ├── XcodeProjectParser.swift   # .xcodeproj parser
         ├── AppleDocsService.swift     # Apple web docs fetcher
