@@ -16,7 +16,9 @@ An MCP (Model Context Protocol) server that provides Claude Code with access to 
 
 - macOS 13.0+
 - Swift 6.0+ (Xcode 16+)
-- Claude Code CLI
+- An MCP-compatible client:
+  - [Claude Code](https://claude.ai/claude-code) (Anthropic)
+  - [Codex CLI](https://github.com/openai/codex) (OpenAI)
 
 ## Installation
 
@@ -49,6 +51,38 @@ Or manually add to your MCP configuration (`~/.claude.json` or project `.claude/
     }
   }
 }
+```
+
+### Configure OpenAI Codex CLI
+
+Add the MCP server to Codex:
+
+```bash
+codex mcp add apple-docs -- /path/to/AppleDocsTool/.build/release/AppleDocsTool
+```
+
+Or manually add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.apple-docs]
+command = "/path/to/AppleDocsTool/.build/release/AppleDocsTool"
+args = []
+```
+
+Optional settings:
+
+```toml
+[mcp_servers.apple-docs]
+command = "/path/to/AppleDocsTool/.build/release/AppleDocsTool"
+args = []
+startup_timeout = 15  # seconds, increase if needed
+tool_timeout = 120    # seconds for long operations like symbol extraction
+```
+
+Verify the server is registered:
+
+```bash
+codex mcp list
 ```
 
 ## Using with Claude Code
