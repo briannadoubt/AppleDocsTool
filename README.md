@@ -11,6 +11,8 @@ An MCP (Model Context Protocol) server that provides Claude Code with access to 
 - **Local Documentation Fallback** - Use locally installed Xcode documentation when available
 - **Fuzzy Search** - Search across project symbols and Apple frameworks with intelligent matching (exact, prefix, camelCase, fuzzy)
 - **Project Summary** - Quick overview of project structure, dependencies, and key types
+- **Build & Test** - Build Swift packages and Xcode projects, run tests with structured output
+- **Profiling** - Profile apps with Instruments (Time Profiler, Allocations, Leaks, etc.)
 
 ## Requirements
 
@@ -22,10 +24,30 @@ An MCP (Model Context Protocol) server that provides Claude Code with access to 
 
 ## Installation
 
+### Install via Mint (Recommended)
+
+[Mint](https://github.com/yonaskolb/Mint) is the easiest way to install and manage AppleDocsTool:
+
+```bash
+# Install Mint if you haven't already
+brew install mint
+
+# Install AppleDocsTool
+mint install briannadoubt/AppleDocsTool
+
+# Configure Claude Code to use it
+claude mcp add apple-docs ~/.mint/bin/AppleDocsTool
+```
+
+To update to the latest version:
+```bash
+mint install briannadoubt/AppleDocsTool
+```
+
 ### Build from Source
 
 ```bash
-git clone https://github.com/yourusername/AppleDocsTool.git
+git clone https://github.com/briannadoubt/AppleDocsTool.git
 cd AppleDocsTool
 swift build -c release
 ```
@@ -286,6 +308,141 @@ Give me an overview of the project at /Users/me/MyApp
 - External dependencies with versions
 - Key public types (structs, classes, protocols, enums)
 
+### `swift_build`
+
+Build a Swift package using `swift build`. Returns structured JSON with build status, errors, warnings, and duration.
+
+**Parameters:**
+- `project_path` (required): Path to Package.swift or directory containing it
+- `configuration` (optional): "debug" or "release" (default: "debug")
+- `target` (optional): Specific target to build
+- `clean` (optional): Clean before building (default: false)
+
+**Example:**
+```
+Build my Swift package at /Users/me/MyApp in release mode
+```
+
+### `swift_test`
+
+Run Swift package tests using `swift test`. Returns structured JSON with test results including passed, failed, skipped counts and individual test case details.
+
+**Parameters:**
+- `project_path` (required): Path to Package.swift or directory containing it
+- `filter` (optional): Test filter pattern (e.g., "MyTests.testFoo")
+- `parallel` (optional): Run tests in parallel (default: true)
+- `enable_code_coverage` (optional): Enable code coverage (default: false)
+
+**Example:**
+```
+Run tests for my Swift package, filtering to just the NetworkTests
+```
+
+### `swift_run`
+
+Run a Swift package executable using `swift run`. Returns stdout, stderr, exit code, and duration.
+
+**Parameters:**
+- `project_path` (required): Path to Package.swift or directory containing it
+- `executable` (optional): Name of the executable to run
+- `arguments` (optional): Arguments to pass to the executable
+- `configuration` (optional): "debug" or "release" (default: "debug")
+- `timeout` (optional): Timeout in seconds (default: 60)
+
+**Example:**
+```
+Run the CLI tool in my package with --help flag
+```
+
+### `xcodebuild_build`
+
+Build an Xcode project or workspace using `xcodebuild`. Returns structured JSON with build status, errors, warnings, and duration.
+
+**Parameters:**
+- `project_path` (required): Path to .xcodeproj, .xcworkspace, or directory
+- `scheme` (optional): Scheme name (auto-detected if not provided)
+- `configuration` (optional): "Debug" or "Release" (default: "Debug")
+- `destination` (optional): Full destination specifier
+- `destination_platform` (optional): Platform shorthand ("iOS Simulator", "macOS", etc.)
+- `clean` (optional): Clean before building (default: false)
+
+**Example:**
+```
+Build my iOS app for the iPhone 16 simulator
+```
+
+### `xcodebuild_test`
+
+Run Xcode project tests using `xcodebuild test`. Returns structured JSON with test results.
+
+**Parameters:**
+- `project_path` (required): Path to .xcodeproj, .xcworkspace, or directory
+- `scheme` (optional): Scheme name (auto-detected if not provided)
+- `destination` (optional): Full destination specifier
+- `destination_platform` (optional): Platform shorthand
+- `test_plan` (optional): Test plan name
+- `only_testing` (optional): Specific tests to run
+- `skip_testing` (optional): Tests to skip
+- `enable_code_coverage` (optional): Enable code coverage (default: false)
+
+**Example:**
+```
+Run the unit tests for my iOS app on the simulator
+```
+
+### `list_schemes`
+
+List available schemes for an Xcode project or Swift package.
+
+**Parameters:**
+- `project_path` (required): Path to .xcodeproj, .xcworkspace, or Package.swift
+
+**Example:**
+```
+What schemes are available in my Xcode project?
+```
+
+### `list_destinations`
+
+List available build destinations for a project (simulators, devices, etc.).
+
+**Parameters:**
+- `project_path` (required): Path to .xcodeproj or .xcworkspace
+- `scheme` (optional): Scheme to get destinations for
+- `platform` (optional): Filter by platform ("iOS", "macOS", "tvOS", "watchOS", "visionOS")
+
+**Example:**
+```
+What iOS simulators are available for building my app?
+```
+
+### `instruments_profile`
+
+Profile an application using Instruments. Supports any Instruments template (Time Profiler, Allocations, Leaks, etc.).
+
+**Parameters:**
+- `target` (required): Path to app bundle, executable, or process ID to profile
+- `template` (required): Instruments template name (e.g., "Time Profiler", "Allocations", "Leaks")
+- `duration` (optional): Recording duration in seconds (default: 10)
+- `output_path` (optional): Output path for .trace file
+- `device` (optional): Device identifier for iOS/watchOS apps
+
+**Example:**
+```
+Profile my app for memory leaks using the Leaks template
+```
+
+### `list_instruments_templates`
+
+List available Instruments profiling templates.
+
+**Parameters:** None
+
+**Example:**
+```
+What Instruments templates are available for profiling?
+```
+
 ## How It Works
 
 ### Symbol Extraction
@@ -333,7 +490,7 @@ AppleDocsTool/
 └── Sources/AppleDocsTool/
     ├── main.swift                 # Entry point
     ├── Server/
-    │   └── MCPServer.swift        # MCP server & tool handlers (7 tools)
+    │   └── MCPServer.swift        # MCP server & tool handlers (16 tools)
     ├── Models/
     │   ├── Symbol.swift           # Swift symbol representation
     │   ├── Documentation.swift    # Apple docs models

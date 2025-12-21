@@ -12,6 +12,8 @@ final class AppleDocsToolServer: @unchecked Sendable {
     private let dependencyService = DependencyService()
     private let gitHubDocsService = GitHubDocsService()
     private let searchService = SearchService()
+    private let buildService = BuildService()
+    private let instrumentsService = InstrumentsService()
 
     init() {
         self.server = Server(
@@ -199,6 +201,247 @@ final class AppleDocsToolServer: @unchecked Sendable {
                     ]),
                     "required": .array([.string("project_path")])
                 ])
+            ),
+
+            // MARK: - Build, Test, Run Tools
+
+            Tool(
+                name: "swift_build",
+                description: "Build a Swift package using swift build. Returns structured JSON with build status, errors, warnings, and duration.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "project_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to Package.swift or directory containing it")
+                        ]),
+                        "configuration": .object([
+                            "type": .string("string"),
+                            "description": .string("Build configuration: 'debug' or 'release' (default: 'debug')"),
+                            "enum": .array([.string("debug"), .string("release")])
+                        ]),
+                        "target": .object([
+                            "type": .string("string"),
+                            "description": .string("Specific target to build (optional, builds all if not specified)")
+                        ]),
+                        "clean": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Clean before building (default: false)")
+                        ])
+                    ]),
+                    "required": .array([.string("project_path")])
+                ])
+            ),
+            Tool(
+                name: "swift_test",
+                description: "Run Swift package tests using swift test. Returns structured JSON with test results including passed, failed, skipped counts and individual test case details.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "project_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to Package.swift or directory containing it")
+                        ]),
+                        "filter": .object([
+                            "type": .string("string"),
+                            "description": .string("Test filter pattern (e.g., 'MyTests.testFoo' or 'MyTests')")
+                        ]),
+                        "parallel": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Run tests in parallel (default: true)")
+                        ]),
+                        "enable_code_coverage": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Enable code coverage (default: false)")
+                        ])
+                    ]),
+                    "required": .array([.string("project_path")])
+                ])
+            ),
+            Tool(
+                name: "swift_run",
+                description: "Run a Swift package executable using swift run. Returns stdout, stderr, exit code, and duration.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "project_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to Package.swift or directory containing it")
+                        ]),
+                        "executable": .object([
+                            "type": .string("string"),
+                            "description": .string("Name of the executable to run (optional, uses first executable)")
+                        ]),
+                        "arguments": .object([
+                            "type": .string("array"),
+                            "description": .string("Arguments to pass to the executable"),
+                            "items": .object(["type": .string("string")])
+                        ]),
+                        "configuration": .object([
+                            "type": .string("string"),
+                            "description": .string("Build configuration: 'debug' or 'release' (default: 'debug')"),
+                            "enum": .array([.string("debug"), .string("release")])
+                        ]),
+                        "timeout": .object([
+                            "type": .string("integer"),
+                            "description": .string("Timeout in seconds (default: 60)")
+                        ])
+                    ]),
+                    "required": .array([.string("project_path")])
+                ])
+            ),
+            Tool(
+                name: "xcodebuild_build",
+                description: "Build an Xcode project or workspace using xcodebuild. Returns structured JSON with build status, errors, warnings, and duration.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "project_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to .xcodeproj, .xcworkspace, or directory containing them")
+                        ]),
+                        "scheme": .object([
+                            "type": .string("string"),
+                            "description": .string("Scheme name (auto-detected if not provided)")
+                        ]),
+                        "configuration": .object([
+                            "type": .string("string"),
+                            "description": .string("Build configuration: 'Debug' or 'Release' (default: 'Debug')")
+                        ]),
+                        "destination": .object([
+                            "type": .string("string"),
+                            "description": .string("Full destination specifier (e.g., 'platform=iOS Simulator,name=iPhone 16')")
+                        ]),
+                        "destination_platform": .object([
+                            "type": .string("string"),
+                            "description": .string("Platform shorthand: 'iOS Simulator', 'macOS', 'tvOS Simulator', 'watchOS Simulator', 'iOS', 'tvOS', 'watchOS', 'visionOS Simulator'")
+                        ]),
+                        "clean": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Clean before building (default: false)")
+                        ])
+                    ]),
+                    "required": .array([.string("project_path")])
+                ])
+            ),
+            Tool(
+                name: "xcodebuild_test",
+                description: "Run Xcode project tests using xcodebuild test. Returns structured JSON with test results.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "project_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to .xcodeproj, .xcworkspace, or directory containing them")
+                        ]),
+                        "scheme": .object([
+                            "type": .string("string"),
+                            "description": .string("Scheme name (auto-detected if not provided)")
+                        ]),
+                        "destination": .object([
+                            "type": .string("string"),
+                            "description": .string("Full destination specifier")
+                        ]),
+                        "destination_platform": .object([
+                            "type": .string("string"),
+                            "description": .string("Platform shorthand for destination")
+                        ]),
+                        "test_plan": .object([
+                            "type": .string("string"),
+                            "description": .string("Test plan name")
+                        ]),
+                        "only_testing": .object([
+                            "type": .string("array"),
+                            "description": .string("Specific tests to run (e.g., 'MyTests/testFoo')"),
+                            "items": .object(["type": .string("string")])
+                        ]),
+                        "skip_testing": .object([
+                            "type": .string("array"),
+                            "description": .string("Tests to skip"),
+                            "items": .object(["type": .string("string")])
+                        ]),
+                        "enable_code_coverage": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Enable code coverage (default: false)")
+                        ])
+                    ]),
+                    "required": .array([.string("project_path")])
+                ])
+            ),
+            Tool(
+                name: "list_schemes",
+                description: "List available schemes for an Xcode project or Swift package.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "project_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to .xcodeproj, .xcworkspace, or Package.swift")
+                        ])
+                    ]),
+                    "required": .array([.string("project_path")])
+                ])
+            ),
+            Tool(
+                name: "list_destinations",
+                description: "List available build destinations for a project (simulators, devices, etc.).",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "project_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to .xcodeproj or .xcworkspace")
+                        ]),
+                        "scheme": .object([
+                            "type": .string("string"),
+                            "description": .string("Scheme to get destinations for")
+                        ]),
+                        "platform": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by platform: 'iOS', 'macOS', 'tvOS', 'watchOS', 'visionOS'")
+                        ])
+                    ]),
+                    "required": .array([.string("project_path")])
+                ])
+            ),
+            Tool(
+                name: "instruments_profile",
+                description: "Profile an application using Instruments. Supports any Instruments template (Time Profiler, Allocations, Leaks, etc.).",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "target": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to app bundle, executable, or process ID to profile")
+                        ]),
+                        "template": .object([
+                            "type": .string("string"),
+                            "description": .string("Instruments template name (e.g., 'Time Profiler', 'Allocations', 'Leaks', 'App Launch')")
+                        ]),
+                        "duration": .object([
+                            "type": .string("integer"),
+                            "description": .string("Recording duration in seconds (default: 10)")
+                        ]),
+                        "output_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Output path for .trace file (optional)")
+                        ]),
+                        "device": .object([
+                            "type": .string("string"),
+                            "description": .string("Device identifier for iOS/watchOS apps")
+                        ])
+                    ]),
+                    "required": .array([.string("target"), .string("template")])
+                ])
+            ),
+            Tool(
+                name: "list_instruments_templates",
+                description: "List available Instruments profiling templates.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([:]),
+                    "required": .array([])
+                ])
             )
         ]
     }
@@ -226,6 +469,34 @@ final class AppleDocsToolServer: @unchecked Sendable {
 
             case "get_project_summary":
                 return try await handleGetProjectSummary(params.arguments)
+
+            // Build, Test, Run tools
+            case "swift_build":
+                return try await handleSwiftBuild(params.arguments)
+
+            case "swift_test":
+                return try await handleSwiftTest(params.arguments)
+
+            case "swift_run":
+                return try await handleSwiftRun(params.arguments)
+
+            case "xcodebuild_build":
+                return try await handleXcodebuildBuild(params.arguments)
+
+            case "xcodebuild_test":
+                return try await handleXcodebuildTest(params.arguments)
+
+            case "list_schemes":
+                return try await handleListSchemes(params.arguments)
+
+            case "list_destinations":
+                return try await handleListDestinations(params.arguments)
+
+            case "instruments_profile":
+                return try await handleInstrumentsProfile(params.arguments)
+
+            case "list_instruments_templates":
+                return try await handleListInstrumentsTemplates(params.arguments)
 
             default:
                 return .init(content: [.text("Unknown tool: \(params.name)")], isError: true)
@@ -890,5 +1161,335 @@ final class AppleDocsToolServer: @unchecked Sendable {
         }
 
         return .init(content: [.text(response)], isError: false)
+    }
+
+    // MARK: - Build, Test, Run Handlers
+
+    private func handleSwiftBuild(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let projectPath = args["project_path"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: project_path")], isError: true)
+        }
+
+        let configuration = args["configuration"]?.stringValue ?? "debug"
+        let target = args["target"]?.stringValue
+        let clean = args["clean"]?.boolValue ?? false
+
+        let result = try await buildService.swiftBuild(
+            at: projectPath,
+            configuration: configuration,
+            target: target,
+            clean: clean
+        )
+
+        return formatBuildResult(result)
+    }
+
+    private func handleSwiftTest(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let projectPath = args["project_path"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: project_path")], isError: true)
+        }
+
+        let filter = args["filter"]?.stringValue
+        let parallel = args["parallel"]?.boolValue ?? true
+        let enableCodeCoverage = args["enable_code_coverage"]?.boolValue ?? false
+
+        let result = try await buildService.swiftTest(
+            at: projectPath,
+            filter: filter,
+            parallel: parallel,
+            enableCodeCoverage: enableCodeCoverage
+        )
+
+        return formatTestResult(result)
+    }
+
+    private func handleSwiftRun(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let projectPath = args["project_path"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: project_path")], isError: true)
+        }
+
+        let executable = args["executable"]?.stringValue
+        let execArguments = args["arguments"]?.arrayValue?.compactMap { $0.stringValue } ?? []
+        let configuration = args["configuration"]?.stringValue ?? "debug"
+        let timeout = TimeInterval(args["timeout"]?.intValue ?? 60)
+
+        let result = try await buildService.swiftRun(
+            at: projectPath,
+            executable: executable,
+            arguments: execArguments,
+            configuration: configuration,
+            timeout: timeout
+        )
+
+        return formatRunResult(result)
+    }
+
+    private func handleXcodebuildBuild(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let projectPath = args["project_path"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: project_path")], isError: true)
+        }
+
+        let scheme = args["scheme"]?.stringValue
+        let configuration = args["configuration"]?.stringValue ?? "Debug"
+        let destination = args["destination"]?.stringValue
+        let destinationPlatform = args["destination_platform"]?.stringValue
+        let clean = args["clean"]?.boolValue ?? false
+
+        let result = try await buildService.xcodebuild(
+            at: projectPath,
+            scheme: scheme,
+            configuration: configuration,
+            destination: destination,
+            destinationPlatform: destinationPlatform,
+            clean: clean
+        )
+
+        return formatBuildResult(result)
+    }
+
+    private func handleXcodebuildTest(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let projectPath = args["project_path"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: project_path")], isError: true)
+        }
+
+        let scheme = args["scheme"]?.stringValue
+        let destination = args["destination"]?.stringValue
+        let destinationPlatform = args["destination_platform"]?.stringValue
+        let testPlan = args["test_plan"]?.stringValue
+        let onlyTesting = args["only_testing"]?.arrayValue?.compactMap { $0.stringValue }
+        let skipTesting = args["skip_testing"]?.arrayValue?.compactMap { $0.stringValue }
+        let enableCodeCoverage = args["enable_code_coverage"]?.boolValue ?? false
+
+        let result = try await buildService.xcodeTest(
+            at: projectPath,
+            scheme: scheme,
+            destination: destination,
+            destinationPlatform: destinationPlatform,
+            testPlan: testPlan,
+            onlyTesting: onlyTesting,
+            skipTesting: skipTesting,
+            enableCodeCoverage: enableCodeCoverage
+        )
+
+        return formatTestResult(result)
+    }
+
+    private func handleListSchemes(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let projectPath = args["project_path"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: project_path")], isError: true)
+        }
+
+        let schemes = try await buildService.listSchemes(at: projectPath)
+
+        let result = SchemesResult(projectPath: projectPath, schemes: schemes)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(jsonString)], isError: false)
+    }
+
+    private func handleListDestinations(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let projectPath = args["project_path"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: project_path")], isError: true)
+        }
+
+        let scheme = args["scheme"]?.stringValue
+        let platform = args["platform"]?.stringValue
+
+        let destinations = try await buildService.listDestinations(
+            at: projectPath,
+            scheme: scheme,
+            platform: platform
+        )
+
+        let result = DestinationsResult(
+            projectPath: projectPath,
+            scheme: scheme,
+            destinations: destinations
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(jsonString)], isError: false)
+    }
+
+    private func handleInstrumentsProfile(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let target = args["target"]?.stringValue,
+              let template = args["template"]?.stringValue else {
+            return .init(content: [.text("Missing required parameters: target and template")], isError: true)
+        }
+
+        let duration = args["duration"]?.intValue ?? 10
+        let outputPath = args["output_path"]?.stringValue
+        let device = args["device"]?.stringValue
+
+        let result = try await instrumentsService.profile(
+            target: target,
+            template: template,
+            duration: duration,
+            outputPath: outputPath,
+            device: device
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        var response = "## Profiling Complete\n\n"
+        response += result.summaryText + "\n\n"
+        response += "Trace file: `\(result.tracePath)`\n\n"
+        response += "### Details\n\n\(jsonString)"
+
+        return .init(content: [.text(response)], isError: false)
+    }
+
+    private func handleListInstrumentsTemplates(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        let templates = try await instrumentsService.listTemplates()
+
+        let result = TemplatesResult(templates: templates)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(jsonString)], isError: false)
+    }
+
+    // MARK: - Result Formatting Helpers
+
+    private func formatBuildResult(_ result: BuildResult) -> CallTool.Result {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        do {
+            let jsonData = try encoder.encode(result)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+            var response = "## Build Result\n\n"
+            response += result.summary + "\n\n"
+
+            if !result.errors.isEmpty {
+                response += "### Errors (\(result.errors.count))\n\n"
+                for error in result.errors {
+                    if let file = error.file, let line = error.line {
+                        response += "- `\(file):\(line)`: \(error.message)\n"
+                    } else {
+                        response += "- \(error.message)\n"
+                    }
+                }
+                response += "\n"
+            }
+
+            if !result.warnings.isEmpty {
+                response += "### Warnings (\(result.warnings.count))\n\n"
+                for warning in result.warnings.prefix(10) {
+                    if let file = warning.file, let line = warning.line {
+                        response += "- `\(file):\(line)`: \(warning.message)\n"
+                    } else {
+                        response += "- \(warning.message)\n"
+                    }
+                }
+                if result.warnings.count > 10 {
+                    response += "- ... and \(result.warnings.count - 10) more\n"
+                }
+                response += "\n"
+            }
+
+            response += "### Full Result\n\n```json\n\(jsonString)\n```"
+
+            return .init(content: [.text(response)], isError: !result.success)
+        } catch {
+            return .init(content: [.text("Error encoding result: \(error)")], isError: true)
+        }
+    }
+
+    private func formatTestResult(_ result: TestResult) -> CallTool.Result {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        do {
+            let jsonData = try encoder.encode(result)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+            var response = "## Test Result\n\n"
+            response += result.summary + "\n\n"
+
+            response += "| Status | Count |\n"
+            response += "|--------|-------|\n"
+            response += "| Passed | \(result.passed) |\n"
+            response += "| Failed | \(result.failed) |\n"
+            response += "| Skipped | \(result.skipped) |\n"
+            response += "| **Total** | **\(result.totalTests)** |\n\n"
+
+            // Show failed tests
+            let failedTests = result.testCases.filter { $0.status == .failed }
+            if !failedTests.isEmpty {
+                response += "### Failed Tests\n\n"
+                for test in failedTests {
+                    response += "#### \(test.className).\(test.name)\n"
+                    if let message = test.failureMessage {
+                        response += "- **Error**: \(message)\n"
+                    }
+                    if let location = test.failureLocation {
+                        response += "- **Location**: `\(location)`\n"
+                    }
+                    response += "\n"
+                }
+            }
+
+            response += "### Full Result\n\n```json\n\(jsonString)\n```"
+
+            return .init(content: [.text(response)], isError: !result.success)
+        } catch {
+            return .init(content: [.text("Error encoding result: \(error)")], isError: true)
+        }
+    }
+
+    private func formatRunResult(_ result: RunResult) -> CallTool.Result {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        do {
+            let jsonData = try encoder.encode(result)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+            var response = "## Run Result\n\n"
+            response += result.summary + "\n\n"
+
+            if !result.stdout.isEmpty {
+                response += "### Standard Output\n\n```\n\(result.stdout.prefix(5000))"
+                if result.stdout.count > 5000 {
+                    response += "\n... (truncated, \(result.stdout.count) total characters)"
+                }
+                response += "\n```\n\n"
+            }
+
+            if !result.stderr.isEmpty {
+                response += "### Standard Error\n\n```\n\(result.stderr.prefix(2000))"
+                if result.stderr.count > 2000 {
+                    response += "\n... (truncated)"
+                }
+                response += "\n```\n\n"
+            }
+
+            response += "### Details\n\n```json\n\(jsonString)\n```"
+
+            return .init(content: [.text(response)], isError: !result.success)
+        } catch {
+            return .init(content: [.text("Error encoding result: \(error)")], isError: true)
+        }
     }
 }
