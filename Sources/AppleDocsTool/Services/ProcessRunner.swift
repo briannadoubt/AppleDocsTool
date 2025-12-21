@@ -86,12 +86,50 @@ struct ProcessRunner {
         process.standardOutput = outputPipe
         process.standardError = errorPipe
 
+        // Collect output asynchronously to avoid pipe buffer deadlock
+        // (pipe buffer is ~64KB - if it fills, process blocks and never exits)
+        final class LockedData: @unchecked Sendable {
+            private var data = Data()
+            private let lock = NSLock()
+
+            func append(_ newData: Data) {
+                lock.lock()
+                data.append(newData)
+                lock.unlock()
+            }
+
+            func get() -> Data {
+                lock.lock()
+                defer { lock.unlock() }
+                return data
+            }
+        }
+
+        let stdoutData = LockedData()
+        let stderrData = LockedData()
+
+        outputPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                stdoutData.append(data)
+            }
+        }
+        errorPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                stderrData.append(data)
+            }
+        }
+
         let startTime = Date()
         var wasTerminated = false
 
         do {
             try process.run()
         } catch {
+            // Clean up handlers before throwing
+            outputPipe.fileHandleForReading.readabilityHandler = nil
+            errorPipe.fileHandleForReading.readabilityHandler = nil
             throw ProcessError.executionFailed(error.localizedDescription)
         }
 
@@ -107,12 +145,22 @@ struct ProcessRunner {
 
         let duration = Date().timeIntervalSince(startTime)
 
-        // Read output
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        // Clean up readability handlers
+        outputPipe.fileHandleForReading.readabilityHandler = nil
+        errorPipe.fileHandleForReading.readabilityHandler = nil
 
-        let stdout = String(data: outputData, encoding: .utf8) ?? ""
-        let stderr = String(data: errorData, encoding: .utf8) ?? ""
+        // Read any remaining data in the pipes
+        let remainingOutput = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let remainingError = errorPipe.fileHandleForReading.readDataToEndOfFile()
+
+        // Combine all collected data
+        var finalStdout = stdoutData.get()
+        finalStdout.append(remainingOutput)
+        var finalStderr = stderrData.get()
+        finalStderr.append(remainingError)
+
+        let stdout = String(data: finalStdout, encoding: .utf8) ?? ""
+        let stderr = String(data: finalStderr, encoding: .utf8) ?? ""
 
         return Result(
             exitCode: process.terminationStatus,
