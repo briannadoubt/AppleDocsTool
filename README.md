@@ -51,6 +51,88 @@ Or manually add to your MCP configuration (`~/.claude.json` or project `.claude/
 }
 ```
 
+## Using with Claude Code
+
+### Quick Start
+
+Once configured, start Claude Code in your Swift project directory:
+
+```bash
+cd ~/Developer/MySwiftApp
+claude
+```
+
+Claude will automatically have access to the AppleDocsTool MCP server.
+
+### Example Prompts
+
+**Get oriented in a new project:**
+```
+Give me an overview of this project
+```
+→ Uses `get_project_summary` to show targets, dependencies, and key types
+
+**Understand dependencies before coding:**
+```
+What dependencies does this project have? Show me their APIs
+```
+→ Uses `get_project_dependencies` with `include_symbols: true`
+
+**Look up Apple framework documentation:**
+```
+How do I use SwiftUI's Chart view?
+```
+→ Uses `lookup_apple_api` with framework: "Charts", symbol: "Chart"
+
+**Search across everything:**
+```
+Find all ViewModels in this project
+```
+→ Uses `search_symbols` with query: "ViewModel"
+
+**Get library documentation:**
+```
+Show me how to use Alamofire
+```
+→ Uses `get_dependency_docs` to fetch the README from GitHub
+
+### Project-Specific Configuration
+
+For per-project settings, create `.claude/settings.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "apple-docs": {
+      "command": "/path/to/AppleDocsTool/.build/release/AppleDocsTool",
+      "args": []
+    }
+  }
+}
+```
+
+### Verify Installation
+
+Check that the MCP server is registered:
+
+```bash
+claude mcp list
+```
+
+You should see `apple-docs` in the list.
+
+### Tips for Best Results
+
+1. **Build your project first** - Symbol extraction requires compiled modules
+   - SPM: `swift build`
+   - Xcode: Build in Xcode (Cmd+B)
+
+2. **Use `get_project_summary` first** - When starting on unfamiliar code, this gives Claude context about the project structure
+
+3. **Include dependencies** - Use `include_dependencies: true` to help Claude understand what libraries are available
+
+4. **Be specific with Apple docs** - Use symbol names like "Chart" or "URLSession", not article titles
+
 ## Available Tools
 
 ### `get_project_symbols`
