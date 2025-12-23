@@ -2,7 +2,7 @@ import Foundation
 import MCP
 
 /// MCP Server for Apple Documentation and Swift project symbols
-final class AppleDocsToolServer: @unchecked Sendable {
+public final class AppleDocsToolServer: @unchecked Sendable {
     private let server: Server
     private let symbolGraphService = SymbolGraphService()
     private let spmParser = SPMParser()
@@ -18,7 +18,7 @@ final class AppleDocsToolServer: @unchecked Sendable {
     private let simulatorUIService = SimulatorUIService()
     private let recordingManager = RecordingManager()
 
-    init() {
+    public init() {
         self.server = Server(
             name: "apple-docs-tool",
             version: "1.0.0",
@@ -28,7 +28,7 @@ final class AppleDocsToolServer: @unchecked Sendable {
         )
     }
 
-    func start() async throws {
+    public func start() async throws {
         await registerToolHandlers()
 
         let transport = StdioTransport()
