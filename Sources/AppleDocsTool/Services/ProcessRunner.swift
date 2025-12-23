@@ -143,13 +143,17 @@ struct ProcessRunner {
             try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
         }
 
+        // Wait for process to fully terminate and close file descriptors
+        // This is critical to prevent readDataToEndOfFile() from blocking indefinitely
+        process.waitUntilExit()
+
         let duration = Date().timeIntervalSince(startTime)
 
         // Clean up readability handlers
         outputPipe.fileHandleForReading.readabilityHandler = nil
         errorPipe.fileHandleForReading.readabilityHandler = nil
 
-        // Read any remaining data in the pipes
+        // Read any remaining data in the pipes (now safe since process has fully exited)
         let remainingOutput = outputPipe.fileHandleForReading.readDataToEndOfFile()
         let remainingError = errorPipe.fileHandleForReading.readDataToEndOfFile()
 

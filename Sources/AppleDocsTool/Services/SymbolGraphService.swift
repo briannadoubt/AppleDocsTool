@@ -60,6 +60,8 @@ actor SymbolGraphService {
             try await Task.sleep(nanoseconds: 100_000_000) // 100ms
         }
 
+        process.waitUntilExit()
+
         if process.terminationStatus != 0 {
             let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
             let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
@@ -202,6 +204,8 @@ actor SymbolGraphService {
             try await Task.sleep(nanoseconds: 100_000_000) // 100ms
         }
 
+        process.waitUntilExit()
+
         if process.terminationStatus != 0 {
             let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
             let errorMessage = String(data: errorData, encoding: .utf8) ?? "Build failed"
@@ -233,6 +237,7 @@ actor SymbolGraphService {
             try await Task.sleep(nanoseconds: 50_000_000) // 50ms
         }
 
+        process.waitUntilExit()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !path.isEmpty else {
@@ -264,6 +269,7 @@ actor SymbolGraphService {
             try await Task.sleep(nanoseconds: 50_000_000) // 50ms
         }
 
+        process.waitUntilExit()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let target = json["target"] as? [String: Any],
