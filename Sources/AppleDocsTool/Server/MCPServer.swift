@@ -14,6 +14,9 @@ final class AppleDocsToolServer: @unchecked Sendable {
     private let searchService = SearchService()
     private let buildService = BuildService()
     private let instrumentsService = InstrumentsService()
+    private let simulatorService = SimulatorService()
+    private let simulatorUIService = SimulatorUIService()
+    private let recordingManager = RecordingManager()
 
     init() {
         self.server = Server(
@@ -442,6 +445,493 @@ final class AppleDocsToolServer: @unchecked Sendable {
                     "properties": .object([:]),
                     "required": .array([])
                 ])
+            ),
+
+            // MARK: - Simulator Tools (simctl)
+
+            Tool(
+                name: "simctl_list_devices",
+                description: "List iOS/watchOS/tvOS/visionOS simulator devices with optional platform and state filters.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "platform": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by platform: iOS, watchOS, tvOS, visionOS"),
+                            "enum": .array([.string("iOS"), .string("watchOS"), .string("tvOS"), .string("visionOS")])
+                        ]),
+                        "state": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by state: Booted, Shutdown"),
+                            "enum": .array([.string("Booted"), .string("Shutdown")])
+                        ]),
+                        "available_only": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Only show available devices (default: true)")
+                        ])
+                    ]),
+                    "required": .array([])
+                ])
+            ),
+            Tool(
+                name: "simctl_list_runtimes",
+                description: "List available simulator runtimes (iOS versions, etc.).",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "platform": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by platform: iOS, watchOS, tvOS, visionOS"),
+                            "enum": .array([.string("iOS"), .string("watchOS"), .string("tvOS"), .string("visionOS")])
+                        ])
+                    ]),
+                    "required": .array([])
+                ])
+            ),
+            Tool(
+                name: "simctl_device_control",
+                description: "Control simulator device lifecycle: boot, shutdown, create, delete, erase, or clone a device.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "action": .object([
+                            "type": .string("string"),
+                            "description": .string("Action to perform"),
+                            "enum": .array([.string("boot"), .string("shutdown"), .string("create"), .string("delete"), .string("erase"), .string("clone")])
+                        ]),
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted' (required for boot/shutdown/delete/erase/clone)")
+                        ]),
+                        "device_name": .object([
+                            "type": .string("string"),
+                            "description": .string("Name for new device (required for create, optional for clone)")
+                        ]),
+                        "device_type": .object([
+                            "type": .string("string"),
+                            "description": .string("Device type identifier for create (e.g., 'iPhone 16 Pro')")
+                        ]),
+                        "runtime": .object([
+                            "type": .string("string"),
+                            "description": .string("Runtime identifier for create (e.g., 'iOS 18.0')")
+                        ])
+                    ]),
+                    "required": .array([.string("action")])
+                ])
+            ),
+            Tool(
+                name: "simctl_app_install",
+                description: "Install an app bundle (.app) on a simulator.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted'")
+                        ]),
+                        "app_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to the .app bundle to install")
+                        ])
+                    ]),
+                    "required": .array([.string("device_id"), .string("app_path")])
+                ])
+            ),
+            Tool(
+                name: "simctl_app_control",
+                description: "Control app lifecycle: launch, terminate, or uninstall an app.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "action": .object([
+                            "type": .string("string"),
+                            "description": .string("Action to perform"),
+                            "enum": .array([.string("launch"), .string("terminate"), .string("uninstall")])
+                        ]),
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted'")
+                        ]),
+                        "bundle_id": .object([
+                            "type": .string("string"),
+                            "description": .string("App bundle identifier (e.g., 'com.apple.mobilesafari')")
+                        ]),
+                        "arguments": .object([
+                            "type": .string("array"),
+                            "description": .string("Launch arguments (for launch action only)"),
+                            "items": .object(["type": .string("string")])
+                        ]),
+                        "wait_for_debugger": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Wait for debugger to attach (for launch action)")
+                        ])
+                    ]),
+                    "required": .array([.string("action"), .string("device_id"), .string("bundle_id")])
+                ])
+            ),
+            Tool(
+                name: "simctl_app_info",
+                description: "Get information about an installed app or list all installed apps.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted'")
+                        ]),
+                        "bundle_id": .object([
+                            "type": .string("string"),
+                            "description": .string("App bundle identifier (omit to list all apps)")
+                        ])
+                    ]),
+                    "required": .array([.string("device_id")])
+                ])
+            ),
+            Tool(
+                name: "simctl_screenshot",
+                description: "Take a screenshot of the simulator.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted'")
+                        ]),
+                        "output_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to save screenshot (default: auto-generated in temp)")
+                        ]),
+                        "format": .object([
+                            "type": .string("string"),
+                            "description": .string("Image format"),
+                            "enum": .array([.string("png"), .string("jpeg"), .string("tiff"), .string("bmp"), .string("gif")])
+                        ]),
+                        "mask": .object([
+                            "type": .string("string"),
+                            "description": .string("Mask policy for device frame"),
+                            "enum": .array([.string("ignored"), .string("alpha"), .string("black")])
+                        ])
+                    ]),
+                    "required": .array([.string("device_id")])
+                ])
+            ),
+            Tool(
+                name: "simctl_record_video",
+                description: "Start or stop video recording of the simulator.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "action": .object([
+                            "type": .string("string"),
+                            "description": .string("Action: start or stop"),
+                            "enum": .array([.string("start"), .string("stop")])
+                        ]),
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted'")
+                        ]),
+                        "output_path": .object([
+                            "type": .string("string"),
+                            "description": .string("Path to save video (required for start)")
+                        ]),
+                        "codec": .object([
+                            "type": .string("string"),
+                            "description": .string("Video codec"),
+                            "enum": .array([.string("h264"), .string("hevc")])
+                        ]),
+                        "recording_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Recording ID to stop (required for stop action)")
+                        ])
+                    ]),
+                    "required": .array([.string("action"), .string("device_id")])
+                ])
+            ),
+            Tool(
+                name: "simctl_location",
+                description: "Set or clear location on the simulator.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "action": .object([
+                            "type": .string("string"),
+                            "description": .string("Action to perform"),
+                            "enum": .array([.string("set"), .string("clear")])
+                        ]),
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted'")
+                        ]),
+                        "latitude": .object([
+                            "type": .string("number"),
+                            "description": .string("Latitude for set action")
+                        ]),
+                        "longitude": .object([
+                            "type": .string("number"),
+                            "description": .string("Longitude for set action")
+                        ])
+                    ]),
+                    "required": .array([.string("action"), .string("device_id")])
+                ])
+            ),
+            Tool(
+                name: "simctl_push",
+                description: "Send a push notification to the simulator.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted'")
+                        ]),
+                        "bundle_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Target app bundle identifier")
+                        ]),
+                        "title": .object([
+                            "type": .string("string"),
+                            "description": .string("Notification title")
+                        ]),
+                        "body": .object([
+                            "type": .string("string"),
+                            "description": .string("Notification body text")
+                        ]),
+                        "subtitle": .object([
+                            "type": .string("string"),
+                            "description": .string("Notification subtitle")
+                        ]),
+                        "badge": .object([
+                            "type": .string("integer"),
+                            "description": .string("Badge number")
+                        ])
+                    ]),
+                    "required": .array([.string("device_id"), .string("bundle_id")])
+                ])
+            ),
+            Tool(
+                name: "simctl_privacy",
+                description: "Grant, revoke, or reset privacy permissions for an app.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "action": .object([
+                            "type": .string("string"),
+                            "description": .string("Action: grant, revoke, or reset"),
+                            "enum": .array([.string("grant"), .string("revoke"), .string("reset")])
+                        ]),
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted'")
+                        ]),
+                        "bundle_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Target app bundle identifier")
+                        ]),
+                        "service": .object([
+                            "type": .string("string"),
+                            "description": .string("Privacy service: all, calendar, contacts, location, photos, camera, microphone, etc.")
+                        ])
+                    ]),
+                    "required": .array([.string("action"), .string("device_id"), .string("bundle_id"), .string("service")])
+                ])
+            ),
+            Tool(
+                name: "simctl_status_bar",
+                description: "Override simulator status bar appearance (time, battery, network, etc.).",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "action": .object([
+                            "type": .string("string"),
+                            "description": .string("Action: override or clear"),
+                            "enum": .array([.string("override"), .string("clear")])
+                        ]),
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted'")
+                        ]),
+                        "time": .object([
+                            "type": .string("string"),
+                            "description": .string("Time to display (e.g., '9:41')")
+                        ]),
+                        "battery_level": .object([
+                            "type": .string("integer"),
+                            "description": .string("Battery level 0-100")
+                        ]),
+                        "battery_state": .object([
+                            "type": .string("string"),
+                            "description": .string("Battery state: charging, charged, discharging")
+                        ]),
+                        "wifi_bars": .object([
+                            "type": .string("integer"),
+                            "description": .string("WiFi signal bars 0-3")
+                        ]),
+                        "cellular_bars": .object([
+                            "type": .string("integer"),
+                            "description": .string("Cellular signal bars 0-4")
+                        ]),
+                        "operator_name": .object([
+                            "type": .string("string"),
+                            "description": .string("Carrier name to display")
+                        ])
+                    ]),
+                    "required": .array([.string("action"), .string("device_id")])
+                ])
+            ),
+            Tool(
+                name: "simctl_pasteboard",
+                description: "Get or set the simulator pasteboard (clipboard) content.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "action": .object([
+                            "type": .string("string"),
+                            "description": .string("Action: get or set"),
+                            "enum": .array([.string("get"), .string("set")])
+                        ]),
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted'")
+                        ]),
+                        "content": .object([
+                            "type": .string("string"),
+                            "description": .string("Content to set (required for set action)")
+                        ])
+                    ]),
+                    "required": .array([.string("action"), .string("device_id")])
+                ])
+            ),
+            Tool(
+                name: "simctl_open_url",
+                description: "Open a URL in the simulator (for deep linking, universal links, etc.).",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID, name, or 'booted'")
+                        ]),
+                        "url": .object([
+                            "type": .string("string"),
+                            "description": .string("URL to open (http://, https://, or custom scheme)")
+                        ])
+                    ]),
+                    "required": .array([.string("device_id"), .string("url")])
+                ])
+            ),
+
+            // MARK: - Simulator UI Tools (Accessibility API)
+
+            Tool(
+                name: "simulator_tap",
+                description: "Tap at coordinates on the simulator screen. Requires Accessibility permission.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "x": .object([
+                            "type": .string("integer"),
+                            "description": .string("X coordinate in iOS points")
+                        ]),
+                        "y": .object([
+                            "type": .string("integer"),
+                            "description": .string("Y coordinate in iOS points")
+                        ]),
+                        "device_name": .object([
+                            "type": .string("string"),
+                            "description": .string("Simulator device name (optional, uses first found)")
+                        ]),
+                        "tap_type": .object([
+                            "type": .string("string"),
+                            "description": .string("Type of tap"),
+                            "enum": .array([.string("single"), .string("double"), .string("long_press")])
+                        ]),
+                        "duration": .object([
+                            "type": .string("number"),
+                            "description": .string("Long press duration in seconds (default: 1.0)")
+                        ])
+                    ]),
+                    "required": .array([.string("x"), .string("y")])
+                ])
+            ),
+            Tool(
+                name: "simulator_swipe",
+                description: "Perform a swipe gesture on the simulator screen. Requires Accessibility permission.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "from_x": .object([
+                            "type": .string("integer"),
+                            "description": .string("Starting X coordinate")
+                        ]),
+                        "from_y": .object([
+                            "type": .string("integer"),
+                            "description": .string("Starting Y coordinate")
+                        ]),
+                        "to_x": .object([
+                            "type": .string("integer"),
+                            "description": .string("Ending X coordinate")
+                        ]),
+                        "to_y": .object([
+                            "type": .string("integer"),
+                            "description": .string("Ending Y coordinate")
+                        ]),
+                        "duration": .object([
+                            "type": .string("number"),
+                            "description": .string("Swipe duration in seconds (default: 0.3)")
+                        ]),
+                        "device_name": .object([
+                            "type": .string("string"),
+                            "description": .string("Simulator device name (optional)")
+                        ])
+                    ]),
+                    "required": .array([.string("from_x"), .string("from_y"), .string("to_x"), .string("to_y")])
+                ])
+            ),
+            Tool(
+                name: "simulator_type",
+                description: "Type text into the simulator. Requires Accessibility permission and a focused text field.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "text": .object([
+                            "type": .string("string"),
+                            "description": .string("Text to type")
+                        ]),
+                        "device_name": .object([
+                            "type": .string("string"),
+                            "description": .string("Simulator device name (optional)")
+                        ])
+                    ]),
+                    "required": .array([.string("text")])
+                ])
+            ),
+            Tool(
+                name: "simulator_button",
+                description: "Press a hardware button on the simulator. Requires Accessibility permission.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "button": .object([
+                            "type": .string("string"),
+                            "description": .string("Button to press"),
+                            "enum": .array([.string("home"), .string("lock"), .string("volumeUp"), .string("volumeDown"), .string("ringer"), .string("screenshot"), .string("keyboard")])
+                        ]),
+                        "device_name": .object([
+                            "type": .string("string"),
+                            "description": .string("Simulator device name (optional)")
+                        ])
+                    ]),
+                    "required": .array([.string("button")])
+                ])
+            ),
+            Tool(
+                name: "simulator_windows",
+                description: "List all visible simulator windows for UI interaction.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([:]),
+                    "required": .array([])
+                ])
             )
         ]
     }
@@ -497,6 +987,65 @@ final class AppleDocsToolServer: @unchecked Sendable {
 
             case "list_instruments_templates":
                 return try await handleListInstrumentsTemplates(params.arguments)
+
+            // Simulator tools (simctl)
+            case "simctl_list_devices":
+                return try await handleSimctlListDevices(params.arguments)
+
+            case "simctl_list_runtimes":
+                return try await handleSimctlListRuntimes(params.arguments)
+
+            case "simctl_device_control":
+                return try await handleSimctlDeviceControl(params.arguments)
+
+            case "simctl_app_install":
+                return try await handleSimctlAppInstall(params.arguments)
+
+            case "simctl_app_control":
+                return try await handleSimctlAppControl(params.arguments)
+
+            case "simctl_app_info":
+                return try await handleSimctlAppInfo(params.arguments)
+
+            case "simctl_screenshot":
+                return try await handleSimctlScreenshot(params.arguments)
+
+            case "simctl_record_video":
+                return try await handleSimctlRecordVideo(params.arguments)
+
+            case "simctl_location":
+                return try await handleSimctlLocation(params.arguments)
+
+            case "simctl_push":
+                return try await handleSimctlPush(params.arguments)
+
+            case "simctl_privacy":
+                return try await handleSimctlPrivacy(params.arguments)
+
+            case "simctl_status_bar":
+                return try await handleSimctlStatusBar(params.arguments)
+
+            case "simctl_pasteboard":
+                return try await handleSimctlPasteboard(params.arguments)
+
+            case "simctl_open_url":
+                return try await handleSimctlOpenURL(params.arguments)
+
+            // Simulator UI tools (Accessibility API)
+            case "simulator_tap":
+                return try await handleSimulatorTap(params.arguments)
+
+            case "simulator_swipe":
+                return try await handleSimulatorSwipe(params.arguments)
+
+            case "simulator_type":
+                return try await handleSimulatorType(params.arguments)
+
+            case "simulator_button":
+                return try await handleSimulatorButton(params.arguments)
+
+            case "simulator_windows":
+                return try await handleSimulatorWindows(params.arguments)
 
             default:
                 return .init(content: [.text("Unknown tool: \(params.name)")], isError: true)
@@ -1491,5 +2040,633 @@ final class AppleDocsToolServer: @unchecked Sendable {
         } catch {
             return .init(content: [.text("Error encoding result: \(error)")], isError: true)
         }
+    }
+
+    // MARK: - Simulator Handlers (simctl)
+
+    private func handleSimctlListDevices(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        let args = arguments ?? [:]
+
+        let platform: SimulatorPlatform? = args["platform"]?.stringValue.flatMap { SimulatorPlatform(rawValue: $0) }
+        let state: DeviceState? = args["state"]?.stringValue.flatMap { DeviceState(rawValue: $0) }
+        let availableOnly = args["available_only"]?.boolValue ?? true
+
+        let result = try await simulatorService.listDevices(
+            platform: platform,
+            state: state,
+            availableOnly: availableOnly
+        )
+
+        var response = "## Simulator Devices\n\n"
+        response += result.summary + "\n\n"
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        response += "```json\n\(jsonString)\n```"
+
+        return .init(content: [.text(response)], isError: false)
+    }
+
+    private func handleSimctlListRuntimes(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        let args = arguments ?? [:]
+        let platform: SimulatorPlatform? = args["platform"]?.stringValue.flatMap { SimulatorPlatform(rawValue: $0) }
+
+        var runtimes = try await simulatorService.listRuntimes()
+
+        // Filter by platform if specified
+        if let platform = platform {
+            runtimes = runtimes.filter { $0.platform == platform }
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(runtimes)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
+
+        var response = "## Available Runtimes\n\n"
+        response += "Found \(runtimes.count) runtimes\n\n"
+        response += "```json\n\(jsonString)\n```"
+
+        return .init(content: [.text(response)], isError: false)
+    }
+
+    private func handleSimctlDeviceControl(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let action = args["action"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: action")], isError: true)
+        }
+
+        let result: SimulatorOperationResult
+
+        switch action {
+        case "boot":
+            guard let deviceId = args["device_id"]?.stringValue else {
+                return .init(content: [.text("Missing required parameter: device_id")], isError: true)
+            }
+            result = try await simulatorService.bootDevice(deviceId)
+
+        case "shutdown":
+            guard let deviceId = args["device_id"]?.stringValue else {
+                return .init(content: [.text("Missing required parameter: device_id")], isError: true)
+            }
+            result = try await simulatorService.shutdownDevice(deviceId)
+
+        case "create":
+            guard let name = args["device_name"]?.stringValue,
+                  let deviceType = args["device_type"]?.stringValue else {
+                return .init(content: [.text("Missing required parameters: device_name, device_type")], isError: true)
+            }
+            let runtime = args["runtime"]?.stringValue
+            let device = try await simulatorService.createDevice(name: name, deviceTypeId: deviceType, runtimeId: runtime)
+            result = .success("Device created: \(device.name) (\(device.udid))", deviceId: device.udid)
+
+        case "delete":
+            guard let deviceId = args["device_id"]?.stringValue else {
+                return .init(content: [.text("Missing required parameter: device_id")], isError: true)
+            }
+            result = try await simulatorService.deleteDevice(deviceId)
+
+        case "erase":
+            guard let deviceId = args["device_id"]?.stringValue else {
+                return .init(content: [.text("Missing required parameter: device_id")], isError: true)
+            }
+            result = try await simulatorService.eraseDevice(deviceId)
+
+        case "clone":
+            guard let deviceId = args["device_id"]?.stringValue else {
+                return .init(content: [.text("Missing required parameter: device_id")], isError: true)
+            }
+            let newName = args["device_name"]?.stringValue ?? "Cloned Device"
+            let device = try await simulatorService.cloneDevice(deviceId, name: newName)
+            result = .success("Device cloned: \(device.name) (\(device.udid))", deviceId: device.udid)
+
+        default:
+            return .init(content: [.text("Unknown action: \(action)")], isError: true)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(jsonString)], isError: !result.success)
+    }
+
+    private func handleSimctlAppInstall(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let deviceId = args["device_id"]?.stringValue,
+              let appPath = args["app_path"]?.stringValue else {
+            return .init(content: [.text("Missing required parameters: device_id, app_path")], isError: true)
+        }
+
+        let result = try await simulatorService.installApp(deviceId: deviceId, appPath: appPath)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(jsonString)], isError: !result.success)
+    }
+
+    private func handleSimctlAppControl(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let action = args["action"]?.stringValue,
+              let deviceId = args["device_id"]?.stringValue,
+              let bundleId = args["bundle_id"]?.stringValue else {
+            return .init(content: [.text("Missing required parameters: action, device_id, bundle_id")], isError: true)
+        }
+
+        switch action {
+        case "launch":
+            let launchArgs = args["arguments"]?.arrayValue?.compactMap { $0.stringValue } ?? []
+            let waitForDebugger = args["wait_for_debugger"]?.boolValue ?? false
+            let result = try await simulatorService.launchApp(
+                deviceId: deviceId,
+                bundleId: bundleId,
+                arguments: launchArgs,
+                waitForDebugger: waitForDebugger
+            )
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let jsonData = try encoder.encode(result)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+            return .init(content: [.text(jsonString)], isError: !result.success)
+
+        case "terminate":
+            let result = try await simulatorService.terminateApp(deviceId: deviceId, bundleId: bundleId)
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let jsonData = try encoder.encode(result)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+            return .init(content: [.text(jsonString)], isError: !result.success)
+
+        case "uninstall":
+            let result = try await simulatorService.uninstallApp(deviceId: deviceId, bundleId: bundleId)
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let jsonData = try encoder.encode(result)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+            return .init(content: [.text(jsonString)], isError: !result.success)
+
+        default:
+            return .init(content: [.text("Unknown action: \(action)")], isError: true)
+        }
+    }
+
+    private func handleSimctlAppInfo(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let deviceId = args["device_id"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: device_id")], isError: true)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        if let bundleId = args["bundle_id"]?.stringValue {
+            let info = try await simulatorService.getAppInfo(deviceId: deviceId, bundleId: bundleId)
+            let jsonData = try encoder.encode(info)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+            return .init(content: [.text(jsonString)], isError: false)
+        } else {
+            let apps = try await simulatorService.listApps(deviceId: deviceId)
+            let jsonData = try encoder.encode(apps)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
+
+            var response = "## Installed Apps\n\n"
+            response += "Found \(apps.count) apps\n\n"
+            response += "```json\n\(jsonString)\n```"
+
+            return .init(content: [.text(response)], isError: false)
+        }
+    }
+
+    private func handleSimctlScreenshot(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let deviceId = args["device_id"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: device_id")], isError: true)
+        }
+
+        let outputPath = args["output_path"]?.stringValue
+        let format: ScreenshotFormat = args["format"]?.stringValue.flatMap { ScreenshotFormat(rawValue: $0) } ?? .png
+        let mask: MaskPolicy = args["mask"]?.stringValue.flatMap { MaskPolicy(rawValue: $0) } ?? .ignored
+
+        let result = try await simulatorService.takeScreenshot(
+            deviceId: deviceId,
+            outputPath: outputPath,
+            format: format,
+            mask: mask
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        var response = "## Screenshot Captured\n\n"
+        response += result.summary + "\n\n"
+        response += "```json\n\(jsonString)\n```"
+
+        return .init(content: [.text(response)], isError: false)
+    }
+
+    private func handleSimctlRecordVideo(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let action = args["action"]?.stringValue,
+              let deviceId = args["device_id"]?.stringValue else {
+            return .init(content: [.text("Missing required parameters: action, device_id")], isError: true)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        switch action {
+        case "start":
+            let outputPath = args["output_path"]?.stringValue
+            let codec: VideoCodec = args["codec"]?.stringValue.flatMap { VideoCodec(rawValue: $0) } ?? .h264
+
+            let handle = try await simulatorService.startRecording(
+                deviceId: deviceId,
+                outputPath: outputPath,
+                codec: codec
+            )
+
+            // Store the handle for later retrieval
+            await recordingManager.store(handle)
+
+            let jsonData = try encoder.encode(handle)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+            var response = "## Recording Started\n\n"
+            response += "Recording ID: `\(handle.id)`\n"
+            response += "Output: `\(handle.outputPath)`\n\n"
+            response += "Use `simctl_record_video` with action=stop and recording_id=`\(handle.id)` to stop.\n\n"
+            response += "```json\n\(jsonString)\n```"
+
+            return .init(content: [.text(response)], isError: false)
+
+        case "stop":
+            guard let recordingId = args["recording_id"]?.stringValue else {
+                return .init(content: [.text("Missing required parameter: recording_id")], isError: true)
+            }
+
+            // Retrieve the handle
+            guard let handle = await recordingManager.retrieve(recordingId) else {
+                return .init(content: [.text("Recording not found: \(recordingId)")], isError: true)
+            }
+
+            let result = try await simulatorService.stopRecording(handle)
+
+            let jsonData = try encoder.encode(result)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+            var response = "## Recording Stopped\n\n"
+            response += result.summary + "\n\n"
+            response += "```json\n\(jsonString)\n```"
+
+            return .init(content: [.text(response)], isError: false)
+
+        default:
+            return .init(content: [.text("Unknown action: \(action). Use 'start' or 'stop'.")], isError: true)
+        }
+    }
+
+    private func handleSimctlLocation(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let action = args["action"]?.stringValue,
+              let deviceId = args["device_id"]?.stringValue else {
+            return .init(content: [.text("Missing required parameters: action, device_id")], isError: true)
+        }
+
+        let result: SimulatorOperationResult
+
+        switch action {
+        case "set":
+            guard let lat = args["latitude"]?.doubleValue,
+                  let lon = args["longitude"]?.doubleValue else {
+                return .init(content: [.text("Missing required parameters: latitude, longitude")], isError: true)
+            }
+            result = try await simulatorService.setLocation(deviceId: deviceId, latitude: lat, longitude: lon)
+
+        case "clear":
+            result = try await simulatorService.clearLocation(deviceId: deviceId)
+
+        default:
+            return .init(content: [.text("Unknown action: \(action). Use 'set' or 'clear'.")], isError: true)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(jsonString)], isError: !result.success)
+    }
+
+    private func handleSimctlPush(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let deviceId = args["device_id"]?.stringValue,
+              let bundleId = args["bundle_id"]?.stringValue else {
+            return .init(content: [.text("Missing required parameters: device_id, bundle_id")], isError: true)
+        }
+
+        let payload = PushPayload(
+            title: args["title"]?.stringValue,
+            body: args["body"]?.stringValue,
+            subtitle: args["subtitle"]?.stringValue,
+            badge: args["badge"]?.intValue
+        )
+
+        let result = try await simulatorService.sendPushNotification(
+            deviceId: deviceId,
+            bundleId: bundleId,
+            payload: payload
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(jsonString)], isError: !result.success)
+    }
+
+    private func handleSimctlPrivacy(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let action = args["action"]?.stringValue,
+              let deviceId = args["device_id"]?.stringValue,
+              let bundleId = args["bundle_id"]?.stringValue,
+              let serviceStr = args["service"]?.stringValue else {
+            return .init(content: [.text("Missing required parameters: action, device_id, bundle_id, service")], isError: true)
+        }
+
+        guard let service = PrivacyService(rawValue: serviceStr) else {
+            let validServices = PrivacyService.allCases.map { $0.rawValue }.joined(separator: ", ")
+            return .init(content: [.text("Invalid service: \(serviceStr). Valid services: \(validServices)")], isError: true)
+        }
+
+        let result: SimulatorOperationResult
+
+        switch action {
+        case "grant":
+            result = try await simulatorService.grantPermission(deviceId: deviceId, bundleId: bundleId, service: service)
+        case "revoke":
+            result = try await simulatorService.revokePermission(deviceId: deviceId, bundleId: bundleId, service: service)
+        case "reset":
+            result = try await simulatorService.resetPermissions(deviceId: deviceId, service: service, bundleId: bundleId)
+        default:
+            return .init(content: [.text("Unknown action: \(action). Use 'grant', 'revoke', or 'reset'.")], isError: true)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(jsonString)], isError: !result.success)
+    }
+
+    private func handleSimctlStatusBar(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let action = args["action"]?.stringValue,
+              let deviceId = args["device_id"]?.stringValue else {
+            return .init(content: [.text("Missing required parameters: action, device_id")], isError: true)
+        }
+
+        let result: SimulatorOperationResult
+
+        switch action {
+        case "override":
+            var overrides = StatusBarOverrides()
+            overrides.time = args["time"]?.stringValue
+            overrides.batteryLevel = args["battery_level"]?.intValue
+            overrides.batteryState = args["battery_state"]?.stringValue
+            overrides.wifiBars = args["wifi_bars"]?.intValue
+            overrides.cellularBars = args["cellular_bars"]?.intValue
+            overrides.operatorName = args["operator_name"]?.stringValue
+
+            result = try await simulatorService.setStatusBar(deviceId: deviceId, overrides: overrides)
+
+        case "clear":
+            result = try await simulatorService.clearStatusBar(deviceId: deviceId)
+
+        default:
+            return .init(content: [.text("Unknown action: \(action). Use 'override' or 'clear'.")], isError: true)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(jsonString)], isError: !result.success)
+    }
+
+    private func handleSimctlPasteboard(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let action = args["action"]?.stringValue,
+              let deviceId = args["device_id"]?.stringValue else {
+            return .init(content: [.text("Missing required parameters: action, device_id")], isError: true)
+        }
+
+        switch action {
+        case "get":
+            let content = try await simulatorService.getPasteboard(deviceId: deviceId)
+            return .init(content: [.text("**Pasteboard Content:**\n\n```\n\(content)\n```")], isError: false)
+
+        case "set":
+            guard let content = args["content"]?.stringValue else {
+                return .init(content: [.text("Missing required parameter: content")], isError: true)
+            }
+            let result = try await simulatorService.setPasteboard(deviceId: deviceId, content: content)
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let jsonData = try encoder.encode(result)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+            return .init(content: [.text(jsonString)], isError: !result.success)
+
+        default:
+            return .init(content: [.text("Unknown action: \(action). Use 'get' or 'set'.")], isError: true)
+        }
+    }
+
+    private func handleSimctlOpenURL(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let deviceId = args["device_id"]?.stringValue,
+              let url = args["url"]?.stringValue else {
+            return .init(content: [.text("Missing required parameters: device_id, url")], isError: true)
+        }
+
+        let result = try await simulatorService.openURL(deviceId: deviceId, url: url)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(jsonString)], isError: !result.success)
+    }
+
+    // MARK: - Simulator UI Handlers (Accessibility API)
+
+    private func handleSimulatorTap(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let x = args["x"]?.intValue,
+              let y = args["y"]?.intValue else {
+            return .init(content: [.text("Missing required parameters: x, y")], isError: true)
+        }
+
+        let deviceName = args["device_name"]?.stringValue
+        let tapType = args["tap_type"]?.stringValue ?? "single"
+        let duration = args["duration"]?.doubleValue ?? 1.0
+
+        let result: UIInteractionResult
+
+        switch tapType {
+        case "single":
+            result = try await simulatorUIService.tap(x: x, y: y, deviceName: deviceName)
+        case "double":
+            result = try await simulatorUIService.doubleTap(x: x, y: y, deviceName: deviceName)
+        case "long_press":
+            result = try await simulatorUIService.longPress(x: x, y: y, duration: duration, deviceName: deviceName)
+        default:
+            return .init(content: [.text("Unknown tap_type: \(tapType)")], isError: true)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(result.summary + "\n\n```json\n\(jsonString)\n```")], isError: !result.success)
+    }
+
+    private func handleSimulatorSwipe(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let fromX = args["from_x"]?.intValue,
+              let fromY = args["from_y"]?.intValue,
+              let toX = args["to_x"]?.intValue,
+              let toY = args["to_y"]?.intValue else {
+            return .init(content: [.text("Missing required parameters: from_x, from_y, to_x, to_y")], isError: true)
+        }
+
+        let deviceName = args["device_name"]?.stringValue
+        let duration = args["duration"]?.doubleValue ?? 0.3
+
+        let result = try await simulatorUIService.swipe(
+            fromX: fromX, fromY: fromY,
+            toX: toX, toY: toY,
+            duration: duration,
+            deviceName: deviceName
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(result.summary + "\n\n```json\n\(jsonString)\n```")], isError: !result.success)
+    }
+
+    private func handleSimulatorType(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let text = args["text"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: text")], isError: true)
+        }
+
+        let deviceName = args["device_name"]?.stringValue
+
+        let result = try await simulatorUIService.typeText(text, deviceName: deviceName)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(result.summary + "\n\n```json\n\(jsonString)\n```")], isError: !result.success)
+    }
+
+    private func handleSimulatorButton(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let buttonStr = args["button"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: button")], isError: true)
+        }
+
+        guard let button = HardwareButton(rawValue: buttonStr) else {
+            return .init(content: [.text("Unknown button: \(buttonStr). Valid buttons: home, lock, volumeUp, volumeDown, ringer, screenshot, keyboard")], isError: true)
+        }
+
+        let deviceName = args["device_name"]?.stringValue
+
+        let result = try await simulatorUIService.pressButton(button, deviceName: deviceName)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(result.summary + "\n\n```json\n\(jsonString)\n```")], isError: !result.success)
+    }
+
+    private func handleSimulatorWindows(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        // Check accessibility permission first
+        if !simulatorUIService.checkAccessibility() {
+            simulatorUIService.requestAccessibility()
+            return .init(content: [.text("""
+                ## Accessibility Permission Required
+
+                To interact with the simulator UI, you need to grant Accessibility permission to your terminal app.
+
+                **Steps:**
+                1. Open System Settings > Privacy & Security > Accessibility
+                2. Enable your terminal app (Terminal, iTerm2, etc.)
+                3. Try again after granting permission
+
+                The system prompt should appear automatically.
+                """)], isError: true)
+        }
+
+        let windows = try simulatorUIService.getSimulatorWindows()
+
+        if windows.isEmpty {
+            return .init(content: [.text("No simulator windows found. Make sure iOS Simulator is running.")], isError: true)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(windows)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
+
+        var response = "## Simulator Windows\n\n"
+        response += "Found \(windows.count) simulator window(s)\n\n"
+        response += "```json\n\(jsonString)\n```"
+
+        return .init(content: [.text(response)], isError: false)
+    }
+}
+
+// MARK: - Recording Manager Actor
+
+/// Actor to safely manage recording handles across async contexts
+private actor RecordingManager {
+    private var handles: [String: RecordingHandle] = [:]
+
+    func store(_ handle: RecordingHandle) {
+        handles[handle.id] = handle
+    }
+
+    func retrieve(_ id: String) -> RecordingHandle? {
+        handles.removeValue(forKey: id)
     }
 }
