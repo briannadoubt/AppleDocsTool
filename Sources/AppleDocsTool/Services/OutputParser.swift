@@ -305,6 +305,140 @@ struct OutputParser {
         return templates
     }
 
+    // MARK: - Simctl Output Parsing
+
+    /// Parse simctl list devices --json output
+    static func parseSimulatorDevices(_ jsonString: String) throws -> [String: [SimulatorDevice]] {
+        guard let data = jsonString.data(using: .utf8) else {
+            return [:]
+        }
+
+        struct DevicesResponse: Decodable {
+            let devices: [String: [SimulatorDevice]]
+        }
+
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(DevicesResponse.self, from: data)
+        return response.devices
+    }
+
+    /// Parse simctl list runtimes --json output
+    static func parseSimulatorRuntimes(_ jsonString: String) throws -> [SimulatorRuntime] {
+        guard let data = jsonString.data(using: .utf8) else {
+            return []
+        }
+
+        struct RuntimesResponse: Decodable {
+            let runtimes: [SimulatorRuntime]
+        }
+
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(RuntimesResponse.self, from: data)
+        return response.runtimes
+    }
+
+    /// Parse simctl list devicetypes --json output
+    static func parseSimulatorDeviceTypes(_ jsonString: String) throws -> [SimulatorDeviceType] {
+        guard let data = jsonString.data(using: .utf8) else {
+            return []
+        }
+
+        struct DeviceTypesResponse: Decodable {
+            let devicetypes: [SimulatorDeviceType]
+        }
+
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(DeviceTypesResponse.self, from: data)
+        return response.devicetypes
+    }
+
+    /// Parse simctl list --json output (combined devices and runtimes)
+    static func parseSimulatorList(_ jsonString: String) throws -> SimulatorListResult {
+        guard let data = jsonString.data(using: .utf8) else {
+            return SimulatorListResult(devices: [:], runtimes: nil)
+        }
+
+        struct ListResponse: Decodable {
+            let devices: [String: [SimulatorDevice]]
+            let runtimes: [SimulatorRuntime]?
+        }
+
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(ListResponse.self, from: data)
+        return SimulatorListResult(devices: response.devices, runtimes: response.runtimes)
+    }
+
+    /// Parse simctl listapps output (plist format)
+    static func parseInstalledApps(_ plistString: String) throws -> [InstalledApp] {
+        guard let data = plistString.data(using: .utf8) else {
+            return []
+        }
+
+        guard let plist = try PropertyListSerialization.propertyList(
+            from: data,
+            format: nil
+        ) as? [String: [String: Any]] else {
+            return []
+        }
+
+        return plist.compactMap { (bundleId, info) -> InstalledApp? in
+            let name = info["CFBundleName"] as? String
+                ?? info["CFBundleDisplayName"] as? String
+                ?? bundleId
+            let version = info["CFBundleShortVersionString"] as? String
+            let applicationType = info["ApplicationType"] as? String ?? "User"
+
+            return InstalledApp(
+                bundleIdentifier: bundleId,
+                name: name,
+                version: version,
+                applicationType: applicationType
+            )
+        }
+    }
+
+    /// Parse simctl appinfo output (key: value pairs)
+    static func parseAppInfo(_ output: String) -> AppInfo? {
+        var info: [String: String] = [:]
+        let lines = output.components(separatedBy: .newlines)
+
+        for line in lines {
+            let parts = line.split(separator: ":", maxSplits: 1)
+            if parts.count == 2 {
+                let key = parts[0].trimmingCharacters(in: .whitespaces)
+                let value = parts[1].trimmingCharacters(in: .whitespaces)
+                info[key] = value
+            }
+        }
+
+        guard let bundleId = info["ApplicationIdentifier"]
+            ?? info["CFBundleIdentifier"]
+            ?? info["Bundle"] else {
+            return nil
+        }
+
+        return AppInfo(
+            bundleIdentifier: bundleId,
+            name: info["CFBundleName"] ?? info["CFBundleDisplayName"],
+            version: info["CFBundleShortVersionString"],
+            bundleVersion: info["CFBundleVersion"],
+            dataContainer: info["DataContainer"],
+            bundlePath: info["Path"] ?? info["Bundle"],
+            applicationType: info["ApplicationType"]
+        )
+    }
+
+    /// Parse simctl launch output for PID
+    static func parseLaunchPID(_ output: String) -> Int? {
+        // Output format: "com.example.app: 12345"
+        let parts = output.components(separatedBy: ":")
+        if parts.count >= 2 {
+            let pidString = parts.last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return Int(pidString)
+        }
+        return nil
+    }
+
     // MARK: - Helper Methods
 
     private static func extractGroup(_ match: NSTextCheckingResult, _ group: Int, from string: String) -> String {
