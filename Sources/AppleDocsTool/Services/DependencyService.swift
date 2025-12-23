@@ -465,6 +465,7 @@ actor DependencyService {
             try await Task.sleep(nanoseconds: 100_000_000) // 100ms
         }
 
+        process.waitUntilExit()
         let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
 
         guard let json = try? JSONSerialization.jsonObject(with: outputData) as? [String: Any] else {
