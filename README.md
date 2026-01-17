@@ -4,27 +4,27 @@ Apple development tools for Claude Code - simulator UI automation, project analy
 
 ## Install
 
-**Claude Code Plugin (recommended):**
+**From GitHub (works now):**
+```bash
+/plugin marketplace add briannadoubt/AppleDocsTool
+/plugin install apple-docs@briannadoubt
+```
+
+**From official marketplace (after approval):**
 ```bash
 /plugin install apple-docs
 ```
 
-Or via CLI:
-```bash
-claude plugin install apple-docs@claude-plugins-official
-```
-
 <details>
-<summary>Alternative: Install from GitHub</summary>
+<summary>Alternative: Local install</summary>
 
 ```bash
 git clone https://github.com/briannadoubt/AppleDocsTool.git
 claude plugin install ./AppleDocsTool --scope user
 ```
 
-Or manually:
+Or MCP-only (no skills):
 ```bash
-git clone https://github.com/briannadoubt/AppleDocsTool.git
 cd AppleDocsTool && swift build -c release
 claude mcp add apple-docs .build/release/apple-docs
 ```
@@ -32,7 +32,7 @@ claude mcp add apple-docs .build/release/apple-docs
 
 **Verify:**
 ```bash
-claude plugin list    # should show apple-docs
+/plugin list    # should show apple-docs
 ```
 
 ## Architecture
