@@ -820,117 +820,135 @@ public final class AppleDocsToolServer: @unchecked Sendable {
                 ])
             ),
 
-            // MARK: - Simulator UI Tools (Accessibility API)
+            // MARK: - Simulator UI Tools (Consolidated)
 
             Tool(
-                name: "simulator_tap",
-                description: "Tap at coordinates on the simulator screen. Requires Accessibility permission.",
+                name: "simulator_ui_state",
+                description: """
+                    Get the current simulator UI state including screenshot and all visible text with coordinates.
+
+                    **IMPORTANT: Call this FIRST before any simulator interaction to understand what's on screen.**
+
+                    This tool:
+                    1. Takes a screenshot of the simulator
+                    2. Runs OCR to find all visible text
+                    3. Returns text elements with their tap coordinates
+
+                    **Workflow:**
+                    1. Call simulator_ui_state to see what's on screen
+                    2. Find the text/button you want to interact with
+                    3. Use simulator_interact with the coordinates from step 1
+
+                    Returns device info, screenshot path, and all visible text with (x, y) coordinates.
+                    Requires: Simulator running, Accessibility permission for terminal app.
+                    """,
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
+                        "device_id": .object([
+                            "type": .string("string"),
+                            "description": .string("Device UDID or 'booted' for the active simulator (default: booted)")
+                        ])
+                    ]),
+                    "required": .array([])
+                ])
+            ),
+            Tool(
+                name: "simulator_interact",
+                description: """
+                    Interact with the iOS Simulator: tap, swipe, type text, or press hardware buttons.
+
+                    **Coordinates:** Use (x, y) in iOS points. Origin (0,0) is top-left.
+                    Common device sizes: iPhone 16 is 393×852 points, iPhone 16 Pro Max is 440×956 points.
+
+                    **Tip:** Call simulator_ui_state first to get coordinates of visible text elements.
+
+                    **Actions:**
+                    - tap: Single tap at (x, y)
+                    - double_tap: Double tap at (x, y)
+                    - long_press: Long press at (x, y) for specified duration
+                    - swipe: Drag from (x, y) to (to_x, to_y)
+                    - type: Type text (requires a focused text field)
+                    - button: Press hardware button (home, lock, volumeUp, volumeDown, keyboard)
+
+                    Requires: Accessibility permission for terminal app.
+                    """,
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "action": .object([
+                            "type": .string("string"),
+                            "description": .string("The interaction type"),
+                            "enum": .array([.string("tap"), .string("double_tap"), .string("long_press"), .string("swipe"), .string("type"), .string("button")])
+                        ]),
                         "x": .object([
                             "type": .string("integer"),
-                            "description": .string("X coordinate in iOS points")
+                            "description": .string("X coordinate for tap/swipe start (iOS points, 0 = left edge)")
                         ]),
                         "y": .object([
                             "type": .string("integer"),
-                            "description": .string("Y coordinate in iOS points")
-                        ]),
-                        "device_name": .object([
-                            "type": .string("string"),
-                            "description": .string("Simulator device name (optional, uses first found)")
-                        ]),
-                        "tap_type": .object([
-                            "type": .string("string"),
-                            "description": .string("Type of tap"),
-                            "enum": .array([.string("single"), .string("double"), .string("long_press")])
-                        ]),
-                        "duration": .object([
-                            "type": .string("number"),
-                            "description": .string("Long press duration in seconds (default: 1.0)")
-                        ])
-                    ]),
-                    "required": .array([.string("x"), .string("y")])
-                ])
-            ),
-            Tool(
-                name: "simulator_swipe",
-                description: "Perform a swipe gesture on the simulator screen. Requires Accessibility permission.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "from_x": .object([
-                            "type": .string("integer"),
-                            "description": .string("Starting X coordinate")
-                        ]),
-                        "from_y": .object([
-                            "type": .string("integer"),
-                            "description": .string("Starting Y coordinate")
+                            "description": .string("Y coordinate for tap/swipe start (iOS points, 0 = top edge)")
                         ]),
                         "to_x": .object([
                             "type": .string("integer"),
-                            "description": .string("Ending X coordinate")
+                            "description": .string("End X coordinate for swipe")
                         ]),
                         "to_y": .object([
                             "type": .string("integer"),
-                            "description": .string("Ending Y coordinate")
+                            "description": .string("End Y coordinate for swipe")
+                        ]),
+                        "text": .object([
+                            "type": .string("string"),
+                            "description": .string("Text to type (for 'type' action)")
+                        ]),
+                        "button": .object([
+                            "type": .string("string"),
+                            "description": .string("Hardware button (for 'button' action)"),
+                            "enum": .array([.string("home"), .string("lock"), .string("volumeUp"), .string("volumeDown"), .string("ringer"), .string("screenshot"), .string("keyboard")])
                         ]),
                         "duration": .object([
                             "type": .string("number"),
-                            "description": .string("Swipe duration in seconds (default: 0.3)")
+                            "description": .string("Duration in seconds for long_press (default: 1.0) or swipe (default: 0.3)")
                         ]),
                         "device_name": .object([
                             "type": .string("string"),
-                            "description": .string("Simulator device name (optional)")
+                            "description": .string("Target simulator device name (optional, uses first found)")
                         ])
                     ]),
-                    "required": .array([.string("from_x"), .string("from_y"), .string("to_x"), .string("to_y")])
+                    "required": .array([.string("action")])
                 ])
             ),
             Tool(
-                name: "simulator_type",
-                description: "Type text into the simulator. Requires Accessibility permission and a focused text field.",
+                name: "simulator_find_text",
+                description: """
+                    Find text on the simulator screen and return its coordinates for tapping.
+
+                    Takes a screenshot, runs OCR, and searches for the specified text.
+                    Returns the center (x, y) coordinates if found, which you can pass to simulator_interact.
+
+                    **Example workflow:**
+                    1. simulator_find_text(text: "Login") → returns {x: 197, y: 445}
+                    2. simulator_interact(action: "tap", x: 197, y: 445)
+
+                    Matching: Case-insensitive by default. Tries exact match first, then substring match.
+                    """,
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
                         "text": .object([
                             "type": .string("string"),
-                            "description": .string("Text to type")
+                            "description": .string("The text to find on screen")
                         ]),
-                        "device_name": .object([
+                        "device_id": .object([
                             "type": .string("string"),
-                            "description": .string("Simulator device name (optional)")
+                            "description": .string("Device UDID or 'booted' (default: booted)")
+                        ]),
+                        "case_sensitive": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Whether to match case exactly (default: false)")
                         ])
                     ]),
                     "required": .array([.string("text")])
-                ])
-            ),
-            Tool(
-                name: "simulator_button",
-                description: "Press a hardware button on the simulator. Requires Accessibility permission.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "button": .object([
-                            "type": .string("string"),
-                            "description": .string("Button to press"),
-                            "enum": .array([.string("home"), .string("lock"), .string("volumeUp"), .string("volumeDown"), .string("ringer"), .string("screenshot"), .string("keyboard")])
-                        ]),
-                        "device_name": .object([
-                            "type": .string("string"),
-                            "description": .string("Simulator device name (optional)")
-                        ])
-                    ]),
-                    "required": .array([.string("button")])
-                ])
-            ),
-            Tool(
-                name: "simulator_windows",
-                description: "List all visible simulator windows for UI interaction.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([:]),
-                    "required": .array([])
                 ])
             )
         ]
@@ -1031,21 +1049,15 @@ public final class AppleDocsToolServer: @unchecked Sendable {
             case "simctl_open_url":
                 return try await handleSimctlOpenURL(params.arguments)
 
-            // Simulator UI tools (Accessibility API)
-            case "simulator_tap":
-                return try await handleSimulatorTap(params.arguments)
+            // Simulator UI tools (Consolidated)
+            case "simulator_ui_state":
+                return try await handleSimulatorUIState(params.arguments)
 
-            case "simulator_swipe":
-                return try await handleSimulatorSwipe(params.arguments)
+            case "simulator_interact":
+                return try await handleSimulatorInteract(params.arguments)
 
-            case "simulator_type":
-                return try await handleSimulatorType(params.arguments)
-
-            case "simulator_button":
-                return try await handleSimulatorButton(params.arguments)
-
-            case "simulator_windows":
-                return try await handleSimulatorWindows(params.arguments)
+            case "simulator_find_text":
+                return try await handleSimulatorFindText(params.arguments)
 
             default:
                 return .init(content: [.text("Unknown tool: \(params.name)")], isError: true)
@@ -2518,108 +2530,9 @@ public final class AppleDocsToolServer: @unchecked Sendable {
         return .init(content: [.text(jsonString)], isError: !result.success)
     }
 
-    // MARK: - Simulator UI Handlers (Accessibility API)
+    // MARK: - Simulator UI Handlers (Consolidated)
 
-    private func handleSimulatorTap(_ arguments: [String: Value]?) async throws -> CallTool.Result {
-        guard let args = arguments,
-              let x = args["x"]?.intValue,
-              let y = args["y"]?.intValue else {
-            return .init(content: [.text("Missing required parameters: x, y")], isError: true)
-        }
-
-        let deviceName = args["device_name"]?.stringValue
-        let tapType = args["tap_type"]?.stringValue ?? "single"
-        let duration = args["duration"]?.doubleValue ?? 1.0
-
-        let result: UIInteractionResult
-
-        switch tapType {
-        case "single":
-            result = try await simulatorUIService.tap(x: x, y: y, deviceName: deviceName)
-        case "double":
-            result = try await simulatorUIService.doubleTap(x: x, y: y, deviceName: deviceName)
-        case "long_press":
-            result = try await simulatorUIService.longPress(x: x, y: y, duration: duration, deviceName: deviceName)
-        default:
-            return .init(content: [.text("Unknown tap_type: \(tapType)")], isError: true)
-        }
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let jsonData = try encoder.encode(result)
-        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
-
-        return .init(content: [.text(result.summary + "\n\n```json\n\(jsonString)\n```")], isError: !result.success)
-    }
-
-    private func handleSimulatorSwipe(_ arguments: [String: Value]?) async throws -> CallTool.Result {
-        guard let args = arguments,
-              let fromX = args["from_x"]?.intValue,
-              let fromY = args["from_y"]?.intValue,
-              let toX = args["to_x"]?.intValue,
-              let toY = args["to_y"]?.intValue else {
-            return .init(content: [.text("Missing required parameters: from_x, from_y, to_x, to_y")], isError: true)
-        }
-
-        let deviceName = args["device_name"]?.stringValue
-        let duration = args["duration"]?.doubleValue ?? 0.3
-
-        let result = try await simulatorUIService.swipe(
-            fromX: fromX, fromY: fromY,
-            toX: toX, toY: toY,
-            duration: duration,
-            deviceName: deviceName
-        )
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let jsonData = try encoder.encode(result)
-        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
-
-        return .init(content: [.text(result.summary + "\n\n```json\n\(jsonString)\n```")], isError: !result.success)
-    }
-
-    private func handleSimulatorType(_ arguments: [String: Value]?) async throws -> CallTool.Result {
-        guard let args = arguments,
-              let text = args["text"]?.stringValue else {
-            return .init(content: [.text("Missing required parameter: text")], isError: true)
-        }
-
-        let deviceName = args["device_name"]?.stringValue
-
-        let result = try await simulatorUIService.typeText(text, deviceName: deviceName)
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let jsonData = try encoder.encode(result)
-        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
-
-        return .init(content: [.text(result.summary + "\n\n```json\n\(jsonString)\n```")], isError: !result.success)
-    }
-
-    private func handleSimulatorButton(_ arguments: [String: Value]?) async throws -> CallTool.Result {
-        guard let args = arguments,
-              let buttonStr = args["button"]?.stringValue else {
-            return .init(content: [.text("Missing required parameter: button")], isError: true)
-        }
-
-        guard let button = HardwareButton(rawValue: buttonStr) else {
-            return .init(content: [.text("Unknown button: \(buttonStr). Valid buttons: home, lock, volumeUp, volumeDown, ringer, screenshot, keyboard")], isError: true)
-        }
-
-        let deviceName = args["device_name"]?.stringValue
-
-        let result = try await simulatorUIService.pressButton(button, deviceName: deviceName)
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let jsonData = try encoder.encode(result)
-        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
-
-        return .init(content: [.text(result.summary + "\n\n```json\n\(jsonString)\n```")], isError: !result.success)
-    }
-
-    private func handleSimulatorWindows(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+    private func handleSimulatorUIState(_ arguments: [String: Value]?) async throws -> CallTool.Result {
         // Check accessibility permission first
         if !simulatorUIService.checkAccessibility() {
             simulatorUIService.requestAccessibility()
@@ -2637,22 +2550,154 @@ public final class AppleDocsToolServer: @unchecked Sendable {
                 """)], isError: true)
         }
 
-        let windows = try simulatorUIService.getSimulatorWindows()
+        let deviceId = arguments?["device_id"]?.stringValue ?? "booted"
 
-        if windows.isEmpty {
-            return .init(content: [.text("No simulator windows found. Make sure iOS Simulator is running.")], isError: true)
+        // Take a screenshot first
+        let screenshotResult = try await simulatorService.takeScreenshot(deviceId: deviceId, format: .png, mask: .ignored)
+        let screenshotPath = screenshotResult.path
+
+        // Get UI state with OCR
+        let uiState = try await simulatorUIService.getUIState(screenshotPath: screenshotPath)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(uiState)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        return .init(content: [.text(uiState.summary + "\n\n```json\n\(jsonString)\n```")], isError: false)
+    }
+
+    private func handleSimulatorInteract(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let action = args["action"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: action")], isError: true)
+        }
+
+        let deviceName = args["device_name"]?.stringValue
+        let result: UIInteractionResult
+
+        switch action {
+        case "tap":
+            guard let x = args["x"]?.intValue, let y = args["y"]?.intValue else {
+                return .init(content: [.text("tap action requires x and y coordinates")], isError: true)
+            }
+            result = try await simulatorUIService.tap(x: x, y: y, deviceName: deviceName)
+
+        case "double_tap":
+            guard let x = args["x"]?.intValue, let y = args["y"]?.intValue else {
+                return .init(content: [.text("double_tap action requires x and y coordinates")], isError: true)
+            }
+            result = try await simulatorUIService.doubleTap(x: x, y: y, deviceName: deviceName)
+
+        case "long_press":
+            guard let x = args["x"]?.intValue, let y = args["y"]?.intValue else {
+                return .init(content: [.text("long_press action requires x and y coordinates")], isError: true)
+            }
+            let duration = args["duration"]?.doubleValue ?? 1.0
+            result = try await simulatorUIService.longPress(x: x, y: y, duration: duration, deviceName: deviceName)
+
+        case "swipe":
+            guard let x = args["x"]?.intValue,
+                  let y = args["y"]?.intValue,
+                  let toX = args["to_x"]?.intValue,
+                  let toY = args["to_y"]?.intValue else {
+                return .init(content: [.text("swipe action requires x, y, to_x, and to_y coordinates")], isError: true)
+            }
+            let duration = args["duration"]?.doubleValue ?? 0.3
+            result = try await simulatorUIService.swipe(fromX: x, fromY: y, toX: toX, toY: toY, duration: duration, deviceName: deviceName)
+
+        case "type":
+            guard let text = args["text"]?.stringValue else {
+                return .init(content: [.text("type action requires text parameter")], isError: true)
+            }
+            result = try await simulatorUIService.typeText(text, deviceName: deviceName)
+
+        case "button":
+            guard let buttonStr = args["button"]?.stringValue else {
+                return .init(content: [.text("button action requires button parameter")], isError: true)
+            }
+            guard let button = HardwareButton(rawValue: buttonStr) else {
+                return .init(content: [.text("Unknown button: \(buttonStr). Valid: home, lock, volumeUp, volumeDown, ringer, screenshot, keyboard")], isError: true)
+            }
+            result = try await simulatorUIService.pressButton(button, deviceName: deviceName)
+
+        default:
+            return .init(content: [.text("Unknown action: \(action). Valid: tap, double_tap, long_press, swipe, type, button")], isError: true)
         }
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let jsonData = try encoder.encode(windows)
-        let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
+        let jsonData = try encoder.encode(result)
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
 
-        var response = "## Simulator Windows\n\n"
-        response += "Found \(windows.count) simulator window(s)\n\n"
-        response += "```json\n\(jsonString)\n```"
+        return .init(content: [.text(result.summary + "\n\n```json\n\(jsonString)\n```")], isError: !result.success)
+    }
 
-        return .init(content: [.text(response)], isError: false)
+    private func handleSimulatorFindText(_ arguments: [String: Value]?) async throws -> CallTool.Result {
+        guard let args = arguments,
+              let searchText = args["text"]?.stringValue else {
+            return .init(content: [.text("Missing required parameter: text")], isError: true)
+        }
+
+        let deviceId = args["device_id"]?.stringValue ?? "booted"
+        let caseSensitive = args["case_sensitive"]?.boolValue ?? false
+
+        // Take a screenshot first
+        let screenshotResult = try await simulatorService.takeScreenshot(deviceId: deviceId, format: .png, mask: .ignored)
+        let screenshotPath = screenshotResult.path
+
+        // Find the text
+        if let found = try await simulatorUIService.findText(searchText, in: screenshotPath, caseSensitive: caseSensitive) {
+            let response: [String: Any] = [
+                "found": true,
+                "text": found.text,
+                "x": found.centerX,
+                "y": found.centerY,
+                "width": found.width,
+                "height": found.height,
+                "confidence": found.confidence
+            ]
+
+            let jsonData = try JSONSerialization.data(withJSONObject: response, options: [.prettyPrinted, .sortedKeys])
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+            return .init(content: [.text("""
+                ## Text Found: "\(found.text)"
+
+                **Location:** (\(found.centerX), \(found.centerY)) - center point for tapping
+                **Size:** \(found.width) × \(found.height) pixels
+                **Confidence:** \(String(format: "%.1f%%", found.confidence * 100))
+
+                **To tap this element:**
+                ```
+                simulator_interact(action: "tap", x: \(found.centerX), y: \(found.centerY))
+                ```
+
+                ```json
+                \(jsonString)
+                ```
+                """)], isError: false)
+        } else {
+            // Text not found - return all visible text to help the agent
+            let allText = try await simulatorUIService.recognizeText(in: screenshotPath)
+            let visibleTexts = allText.prefix(15).map { "\"\($0.text)\"" }.joined(separator: ", ")
+
+            return .init(content: [.text("""
+                ## Text Not Found: "\(searchText)"
+
+                The text was not found on screen.
+
+                **Visible text on screen:**
+                \(visibleTexts.isEmpty ? "No text detected" : visibleTexts)
+                \(allText.count > 15 ? "\n... and \(allText.count - 15) more" : "")
+
+                **Suggestions:**
+                - Check spelling and case (case_sensitive: \(caseSensitive))
+                - The text may be partially visible or obscured
+                - Try scrolling to reveal more content
+                - Use simulator_ui_state to see all text with coordinates
+                """)], isError: true)
+        }
     }
 }
 

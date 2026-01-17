@@ -182,6 +182,23 @@ import Testing
     #expect(result.totalTests == 0)
 }
 
+@Test func parseTestOutputSwiftTestingFormat() {
+    // Swift Testing framework format (Swift 6+)
+    let output = """
+    Test run started.
+    Test parseSchemesListWorkspaceFormat() passed after 0.003 seconds.
+    Test accessLevelFromSymbolGraph() passed after 0.002 seconds.
+    Test searchExactMatch() failed after 0.003 seconds.
+    Test run with 3 tests passed after 0.010 seconds.
+    """
+    let result = OutputParser.parseTestOutput(output)
+
+    #expect(!result.success)  // One test failed
+    #expect(result.totalTests == 3)
+    #expect(result.passed == 2)
+    #expect(result.failed == 1)
+}
+
 // MARK: - Schemes List Parsing Tests
 
 @Test func parseSchemesListJsonFormat() {

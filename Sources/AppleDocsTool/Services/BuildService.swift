@@ -222,9 +222,24 @@ actor BuildService {
         )
 
         let combinedOutput = result.stdout + "\n" + result.stderr
-        let (errors, warnings) = OutputParser.parseBuildOutput(combinedOutput)
-        let success = result.exitCode == 0 &&
-            (combinedOutput.contains("BUILD SUCCEEDED") || errors.isEmpty)
+        var (errors, warnings) = OutputParser.parseBuildOutput(combinedOutput)
+
+        // Determine success based on exit code and output
+        let buildSucceeded = combinedOutput.contains("BUILD SUCCEEDED")
+        let buildFailed = combinedOutput.contains("BUILD FAILED")
+        let success = result.exitCode == 0 && (buildSucceeded || (!buildFailed && errors.isEmpty))
+
+        // If the build failed but we couldn't parse any errors, extract relevant output as a fallback
+        if !success && errors.isEmpty {
+            let fallbackError = extractBuildFailureReason(from: combinedOutput)
+            errors.append(BuildDiagnostic(
+                message: fallbackError,
+                file: nil,
+                line: nil,
+                column: nil,
+                severity: .error
+            ))
+        }
 
         return BuildResult(
             success: success,
@@ -469,5 +484,67 @@ actor BuildService {
         default:
             return "platform=macOS"
         }
+    }
+
+    /// Extract a meaningful failure reason from build output when structured parsing fails
+    private func extractBuildFailureReason(from output: String) -> String {
+        let lines = output.components(separatedBy: .newlines)
+
+        // Look for common failure indicators
+        var relevantLines: [String] = []
+
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Check for "** BUILD FAILED **" and get context around it
+            if trimmed.contains("BUILD FAILED") {
+                // Get a few lines before for context
+                let startIdx = max(0, index - 5)
+                for i in startIdx..<index {
+                    let contextLine = lines[i].trimmingCharacters(in: .whitespaces)
+                    if !contextLine.isEmpty &&
+                       !contextLine.hasPrefix("Build settings") &&
+                       !contextLine.hasPrefix("===") {
+                        relevantLines.append(contextLine)
+                    }
+                }
+                break
+            }
+
+            // Check for specific failure patterns
+            if trimmed.contains("error:") ||
+               trimmed.hasPrefix("ld:") ||
+               trimmed.contains("undefined symbol") ||
+               trimmed.contains("module not found") ||
+               trimmed.contains("No such module") ||
+               trimmed.contains("framework not found") ||
+               trimmed.contains("library not found") ||
+               trimmed.contains("could not build") {
+                relevantLines.append(trimmed)
+            }
+        }
+
+        if relevantLines.isEmpty {
+            // Last resort: try to find any line with "error" or "failed"
+            for line in lines.suffix(50) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if (trimmed.lowercased().contains("error") ||
+                    trimmed.lowercased().contains("failed")) &&
+                   !trimmed.isEmpty &&
+                   trimmed.count < 500 {
+                    relevantLines.append(trimmed)
+                    if relevantLines.count >= 5 {
+                        break
+                    }
+                }
+            }
+        }
+
+        if relevantLines.isEmpty {
+            return "Build failed with unknown error. Check the full build log for details."
+        }
+
+        // Return up to 5 most relevant lines
+        return relevantLines.prefix(5).joined(separator: "\n")
     }
 }

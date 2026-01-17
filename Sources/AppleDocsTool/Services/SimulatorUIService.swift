@@ -2,6 +2,7 @@ import Foundation
 import CoreGraphics
 import AppKit
 import ApplicationServices
+import Vision
 
 /// Service for interacting with iOS Simulator UI via macOS Accessibility APIs
 final class SimulatorUIService: @unchecked Sendable {
@@ -492,5 +493,181 @@ final class SimulatorUIService: @unchecked Sendable {
             deviceName: deviceName,
             message: nil
         )
+    }
+
+    // MARK: - OCR / Text Recognition
+
+    /// Recognized text element with its location
+    struct RecognizedText: Codable, Sendable {
+        let text: String
+        let x: Int
+        let y: Int
+        let width: Int
+        let height: Int
+        let confidence: Float
+
+        /// Center point for tapping
+        var centerX: Int { x + width / 2 }
+        var centerY: Int { y + height / 2 }
+    }
+
+    /// Perform OCR on a screenshot image
+    func recognizeText(in imagePath: String) async throws -> [RecognizedText] {
+        guard let image = NSImage(contentsOfFile: imagePath) else {
+            throw SimulatorUIError.invalidGesture("Could not load image at path: \(imagePath)")
+        }
+
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            throw SimulatorUIError.invalidGesture("Could not create CGImage from image")
+        }
+
+        return try await performOCR(on: cgImage, imageHeight: cgImage.height)
+    }
+
+    /// Perform OCR on a CGImage
+    private func performOCR(on cgImage: CGImage, imageHeight: Int) async throws -> [RecognizedText] {
+        return try await withCheckedThrowingContinuation { continuation in
+            let request = VNRecognizeTextRequest { request, error in
+                if let error = error {
+                    continuation.resume(throwing: SimulatorUIError.invalidGesture("OCR failed: \(error.localizedDescription)"))
+                    return
+                }
+
+                guard let observations = request.results as? [VNRecognizedTextObservation] else {
+                    continuation.resume(returning: [])
+                    return
+                }
+
+                var results: [RecognizedText] = []
+
+                for observation in observations {
+                    guard let topCandidate = observation.topCandidates(1).first else { continue }
+
+                    // Convert normalized coordinates to pixel coordinates
+                    // Vision uses bottom-left origin, we need top-left
+                    let boundingBox = observation.boundingBox
+                    let x = Int(boundingBox.origin.x * CGFloat(cgImage.width))
+                    let y = Int((1.0 - boundingBox.origin.y - boundingBox.height) * CGFloat(imageHeight))
+                    let width = Int(boundingBox.width * CGFloat(cgImage.width))
+                    let height = Int(boundingBox.height * CGFloat(imageHeight))
+
+                    results.append(RecognizedText(
+                        text: topCandidate.string,
+                        x: x,
+                        y: y,
+                        width: width,
+                        height: height,
+                        confidence: topCandidate.confidence
+                    ))
+                }
+
+                continuation.resume(returning: results)
+            }
+
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            do {
+                try handler.perform([request])
+            } catch {
+                continuation.resume(throwing: SimulatorUIError.invalidGesture("OCR request failed: \(error.localizedDescription)"))
+            }
+        }
+    }
+
+    /// Find text matching a query and return its location
+    func findText(_ query: String, in imagePath: String, caseSensitive: Bool = false) async throws -> RecognizedText? {
+        let allText = try await recognizeText(in: imagePath)
+
+        let normalizedQuery = caseSensitive ? query : query.lowercased()
+
+        // First try exact match
+        if let exact = allText.first(where: {
+            let text = caseSensitive ? $0.text : $0.text.lowercased()
+            return text == normalizedQuery
+        }) {
+            return exact
+        }
+
+        // Then try contains match
+        if let contains = allText.first(where: {
+            let text = caseSensitive ? $0.text : $0.text.lowercased()
+            return text.contains(normalizedQuery)
+        }) {
+            return contains
+        }
+
+        return nil
+    }
+
+    /// Get UI state: window info + all recognized text
+    func getUIState(deviceName: String? = nil, screenshotPath: String) async throws -> UIState {
+        // Get window info
+        let windows = try getSimulatorWindows()
+        let targetWindow = deviceName.flatMap { name in
+            windows.first { $0.deviceName.lowercased().contains(name.lowercased()) }
+        } ?? windows.first
+
+        // Get OCR results
+        let recognizedText = try await recognizeText(in: screenshotPath)
+
+        // Calculate device dimensions from window (subtract title bar)
+        let deviceWidth: Int
+        let deviceHeight: Int
+        if let window = targetWindow {
+            deviceWidth = Int(window.bounds.width)
+            deviceHeight = Int(window.bounds.height - WindowChrome.titleBarHeight)
+        } else {
+            deviceWidth = 0
+            deviceHeight = 0
+        }
+
+        return UIState(
+            deviceName: targetWindow?.deviceName ?? "Unknown",
+            deviceWidth: deviceWidth,
+            deviceHeight: deviceHeight,
+            screenshotPath: screenshotPath,
+            visibleText: recognizedText,
+            windowCount: windows.count
+        )
+    }
+}
+
+// MARK: - UI State
+
+/// Complete UI state with window info and OCR results
+struct UIState: Codable, Sendable {
+    let deviceName: String
+    let deviceWidth: Int
+    let deviceHeight: Int
+    let screenshotPath: String
+    let visibleText: [SimulatorUIService.RecognizedText]
+    let windowCount: Int
+
+    var summary: String {
+        var lines = [
+            "## Simulator UI State",
+            "",
+            "**Device:** \(deviceName)",
+            "**Screen Size:** \(deviceWidth) × \(deviceHeight) points",
+            "**Screenshot:** \(screenshotPath)",
+            ""
+        ]
+
+        if visibleText.isEmpty {
+            lines.append("No text detected on screen.")
+        } else {
+            lines.append("### Visible Text (\(visibleText.count) elements)")
+            lines.append("")
+            for item in visibleText.prefix(20) {
+                lines.append("- \"\(item.text)\" at (\(item.centerX), \(item.centerY))")
+            }
+            if visibleText.count > 20 {
+                lines.append("- ... and \(visibleText.count - 20) more")
+            }
+        }
+
+        return lines.joined(separator: "\n")
     }
 }
