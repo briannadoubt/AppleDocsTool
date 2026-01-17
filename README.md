@@ -1,529 +1,198 @@
 # AppleDocsTool
 
-An MCP (Model Context Protocol) server that provides Claude Code with access to Swift project symbols and Apple's official documentation.
+An MCP server for Apple development with Claude Code. Provides UI automation, project analysis, and Apple documentation lookup.
 
-## Features
+## Quick Install
 
-- **Project Symbol Extraction** - Parse Swift Package Manager and Xcode projects to extract types, functions, and documentation
-- **Dependency Awareness** - Extract symbols from all package dependencies so Claude knows what's already available (prevents code duplication!)
-- **GitHub Documentation** - Fetch README and documentation from dependency GitHub repositories
-- **Apple Documentation Lookup** - Fetch up-to-date documentation from Apple's developer portal
-- **Local Documentation Fallback** - Use locally installed Xcode documentation when available
-- **Fuzzy Search** - Search across project symbols and Apple frameworks with intelligent matching (exact, prefix, camelCase, fuzzy)
-- **Project Summary** - Quick overview of project structure, dependencies, and key types
-- **Build & Test** - Build Swift packages and Xcode projects, run tests with structured output
-- **Profiling** - Profile apps with Instruments (Time Profiler, Allocations, Leaks, etc.)
+```bash
+# Install with Mint (recommended)
+brew install mint
+mint install briannadoubt/AppleDocsTool
+
+# Add to Claude Code
+claude mcp add apple-docs ~/.mint/bin/apple-docs
+```
+
+**Alternative: Build from source**
+```bash
+git clone https://github.com/briannadoubt/AppleDocsTool.git
+cd AppleDocsTool && swift build -c release
+claude mcp add apple-docs .build/release/apple-docs
+```
+
+Verify it's working:
+```bash
+claude mcp list
+```
+
+## Architecture
+
+This tool uses a **skills-first approach** for efficiency:
+
+| Layer | What | Token Cost |
+|-------|------|------------|
+| **Skills** | Shell commands in `skills/` directory | ~0 (just file reads) |
+| **MCP (minimal)** | 3 UI automation tools | ~2K tokens |
+| **MCP (full)** | All 33 tools | ~30K tokens |
+
+By default, the server exposes only 3 tools that **require** macOS Accessibility APIs. Everything else can be done with shell commands documented in the skills.
+
+## Skills
+
+Claude discovers capabilities by reading `skills/SKILLS.md`:
+
+| Skill | Description | Example Commands |
+|-------|-------------|------------------|
+| [analyze-project](skills/analyze-project/SKILL.md) | Understand project structure | `cat Package.swift`, `grep -rn "struct"` |
+| [build-and-test](skills/build-and-test/SKILL.md) | Build and test | `swift build`, `swift test` |
+| [lookup-docs](skills/lookup-docs/SKILL.md) | Find documentation | Apple docs URLs, GitHub READMEs |
+| [control-simulator](skills/control-simulator/SKILL.md) | Manage simulators | `xcrun simctl boot`, `xcrun simctl install` |
+| [profile-app](skills/profile-app/SKILL.md) | Profile performance | `xcrun xctrace record` |
+| [ui-interact](skills/ui-interact/SKILL.md) | UI automation | Requires MCP tools |
+
+## MCP Tools
+
+### Default (Minimal Server)
+
+Only tools that can't be done with shell commands:
+
+| Tool | Description |
+|------|-------------|
+| `simulator_ui_state` | Get screenshot + OCR text with tap coordinates |
+| `simulator_interact` | Tap, swipe, type text, press hardware buttons |
+| `simulator_find_text` | Find text on screen, get coordinates |
+
+### Full Server
+
+For all 33 tools (project symbols, Apple docs, build/test, profiling, etc.):
+
+```bash
+# Configure with --full flag
+claude mcp add apple-docs ~/.mint/bin/apple-docs --args --full
+```
+
+<details>
+<summary>Full tool list</summary>
+
+**Project Analysis**
+- `get_project_symbols` - Extract types, functions, properties
+- `get_project_dependencies` - List dependencies with versions
+- `get_symbol_documentation` - Detailed docs for specific symbols
+- `get_project_summary` - Quick project overview
+- `search_symbols` - Fuzzy search across project and Apple frameworks
+
+**Documentation**
+- `lookup_apple_api` - Apple framework documentation
+- `get_dependency_docs` - Fetch README from GitHub
+
+**Build & Test**
+- `swift_build` - Build Swift packages
+- `swift_test` - Run tests with structured output
+- `swift_run` - Run executables
+- `xcodebuild_build` - Build Xcode projects
+- `xcodebuild_test` - Run Xcode tests
+- `list_schemes` - List available schemes
+- `list_destinations` - List simulators/devices
+
+**Profiling**
+- `instruments_profile` - Profile with any Instruments template
+- `list_instruments_templates` - List available templates
+
+**Simulator Control**
+- `simctl_list_devices` - List simulators
+- `simctl_list_runtimes` - List iOS/tvOS/watchOS versions
+- `simctl_device_control` - Boot, shutdown, create, delete
+- `simctl_app_install` - Install apps
+- `simctl_app_control` - Launch, terminate, uninstall
+- `simctl_app_info` - Get app info
+- `simctl_screenshot` - Capture screenshots
+- `simctl_record_video` - Record video
+- `simctl_location` - Set GPS location
+- `simctl_push` - Send push notifications
+- `simctl_privacy` - Manage permissions
+- `simctl_status_bar` - Override status bar
+- `simctl_pasteboard` - Clipboard access
+- `simctl_open_url` - Open URLs/deep links
+
+**UI Automation**
+- `simulator_ui_state` - Screenshot + OCR
+- `simulator_interact` - Tap, swipe, type, buttons
+- `simulator_find_text` - Find text coordinates
+
+</details>
+
+## Usage Examples
+
+### With Skills (Recommended)
+
+Claude reads the skill files and executes shell commands directly:
+
+```
+You: Analyze this Swift project
+
+Claude: [Reads skills/analyze-project/SKILL.md]
+        [Runs: cat Package.swift]
+        [Runs: grep -rn "struct\|class" Sources/]
+        Here's the project structure...
+```
+
+### With MCP Tools
+
+For UI automation (the only thing that needs MCP):
+
+```
+You: Tap the Login button in the simulator
+
+Claude: [Calls simulator_find_text(text: "Login")]
+        Found at (197, 445)
+        [Calls simulator_interact(action: "tap", x: 197, y: 445)]
+        Tapped Login button
+```
 
 ## Requirements
 
 - macOS 13.0+
 - Swift 6.0+ (Xcode 16+)
-- An MCP-compatible client:
-  - [Claude Code](https://claude.ai/claude-code) (Anthropic)
-  - [Codex CLI](https://github.com/openai/codex) (OpenAI)
-
-## Installation
-
-### Install via Mint (Recommended)
-
-[Mint](https://github.com/yonaskolb/Mint) is the easiest way to install and manage AppleDocsTool:
-
-```bash
-# Install Mint if you haven't already
-brew install mint
-
-# Install AppleDocsTool
-mint install briannadoubt/AppleDocsTool
-
-# Configure Claude Code to use it
-claude mcp add apple-docs ~/.mint/bin/AppleDocsTool
-```
-
-To update to the latest version:
-```bash
-mint install briannadoubt/AppleDocsTool
-```
-
-### Build from Source
-
-```bash
-git clone https://github.com/briannadoubt/AppleDocsTool.git
-cd AppleDocsTool
-swift build -c release
-```
-
-The executable will be at `.build/release/AppleDocsTool`.
-
-### Configure Claude Code
-
-Add the MCP server to Claude Code:
-
-```bash
-claude mcp add apple-docs /path/to/AppleDocsTool/.build/release/AppleDocsTool
-```
-
-Or manually add to your MCP configuration (`~/.claude.json` or project `.claude/settings.json`):
-
-```json
-{
-  "mcpServers": {
-    "apple-docs": {
-      "command": "/path/to/AppleDocsTool/.build/release/AppleDocsTool",
-      "args": []
-    }
-  }
-}
-```
-
-### Configure OpenAI Codex CLI
-
-Add the MCP server to Codex:
-
-```bash
-codex mcp add apple-docs -- /path/to/AppleDocsTool/.build/release/AppleDocsTool
-```
-
-Or manually add to `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.apple-docs]
-command = "/path/to/AppleDocsTool/.build/release/AppleDocsTool"
-args = []
-```
-
-Optional settings:
-
-```toml
-[mcp_servers.apple-docs]
-command = "/path/to/AppleDocsTool/.build/release/AppleDocsTool"
-args = []
-startup_timeout = 15  # seconds, increase if needed
-tool_timeout = 120    # seconds for long operations like symbol extraction
-```
-
-Verify the server is registered:
-
-```bash
-codex mcp list
-```
-
-## Using with Claude Code
-
-### Quick Start
-
-Once configured, start Claude Code in your Swift project directory:
-
-```bash
-cd ~/Developer/MySwiftApp
-claude
-```
-
-Claude will automatically have access to the AppleDocsTool MCP server.
-
-### Example Prompts
-
-**Get oriented in a new project:**
-```
-Give me an overview of this project
-```
-→ Uses `get_project_summary` to show targets, dependencies, and key types
-
-**Understand dependencies before coding:**
-```
-What dependencies does this project have? Show me their APIs
-```
-→ Uses `get_project_dependencies` with `include_symbols: true`
-
-**Look up Apple framework documentation:**
-```
-How do I use SwiftUI's Chart view?
-```
-→ Uses `lookup_apple_api` with framework: "Charts", symbol: "Chart"
-
-**Search across everything:**
-```
-Find all ViewModels in this project
-```
-→ Uses `search_symbols` with query: "ViewModel"
-
-**Get library documentation:**
-```
-Show me how to use Alamofire
-```
-→ Uses `get_dependency_docs` to fetch the README from GitHub
-
-### Project-Specific Configuration
-
-For per-project settings, create `.claude/settings.json` in your project root:
-
-```json
-{
-  "mcpServers": {
-    "apple-docs": {
-      "command": "/path/to/AppleDocsTool/.build/release/AppleDocsTool",
-      "args": []
-    }
-  }
-}
-```
-
-### Verify Installation
-
-Check that the MCP server is registered:
-
-```bash
-claude mcp list
-```
-
-You should see `apple-docs` in the list.
-
-### Tips for Best Results
-
-1. **Build your project first** - Symbol extraction requires compiled modules
-   - SPM: `swift build`
-   - Xcode: Build in Xcode (Cmd+B)
-
-2. **Use `get_project_summary` first** - When starting on unfamiliar code, this gives Claude context about the project structure
-
-3. **Include dependencies** - Use `include_dependencies: true` to help Claude understand what libraries are available
-
-4. **Be specific with Apple docs** - Use symbol names like "Chart" or "URLSession", not article titles
-
-## Available Tools
-
-### `get_project_symbols`
-
-Extract all symbols from a Swift project, optionally including dependency symbols.
-
-**Parameters:**
-- `project_path` (required): Path to Package.swift, .xcodeproj, or .xcworkspace
-- `target` (optional): Specific target to analyze
-- `minimum_access_level` (optional): "public", "internal", or "private" (default: "public")
-- `include_dependencies` (optional): Include symbols from all package dependencies (default: false)
-
-**Example:**
-```
-Get all public symbols from my project at /Users/me/MyApp, including dependencies
-```
-
-### `get_project_dependencies`
-
-List all dependencies for a Swift package with versions and optionally extract their symbols.
-
-**Parameters:**
-- `project_path` (required): Path to Package.swift or directory containing it
-- `include_symbols` (optional): Extract public symbols from each dependency (default: false)
-
-**Example:**
-```
-What dependencies does my project at /Users/me/MyApp have?
-Show me all the APIs available from my project's dependencies
-```
-
-**Why This Matters:** When Claude knows what's in your dependencies, it won't accidentally reimplement functionality that already exists. For example, if you have Alamofire as a dependency, Claude will use it instead of writing custom networking code.
-
-### `get_symbol_documentation`
-
-Get detailed documentation for a specific symbol.
-
-**Parameters:**
-- `project_path` (required): Path to the Swift project
-- `symbol_name` (required): Fully qualified symbol name (e.g., "MyModule.MyClass.myMethod")
-
-**Example:**
-```
-Get documentation for the AppDelegate class in /Users/me/MyApp
-```
-
-### `lookup_apple_api`
-
-Fetch Apple's official documentation for system frameworks.
-
-**Parameters:**
-- `framework` (required): Framework name (e.g., "SwiftUI", "Foundation", "UIKit")
-- `symbol` (optional): Specific symbol to look up
-- `use_local` (optional): Prefer local Xcode docs (default: true)
-
-**Example:**
-```
-Look up the SwiftUI View protocol
-Look up Foundation's URLSession documentation
-```
-
-### `search_symbols`
-
-Search across project symbols and Apple frameworks with fuzzy matching and relevance ranking.
-
-**Parameters:**
-- `query` (required): Search query - supports exact names, prefixes, camelCase (e.g., "VM" finds "ViewModel"), and fuzzy matching
-- `project_path` (optional): Path to Swift project to include
-- `frameworks` (optional): Apple frameworks to search (default: Foundation, SwiftUI, UIKit, Combine)
-- `max_results` (optional): Maximum results to return (default: 50)
-
-**Match Types (in priority order):**
-- `exact` - Perfect match
-- `prefix` - Query matches start of symbol name
-- `camelCase` - Query matches capital letters (e.g., "NSO" finds "NSObject")
-- `contains` - Query found within symbol name
-- `wordBoundary` - Query matches word start
-- `fuzzy` - Similar spelling (Levenshtein distance)
-- `subsequence` - All query characters appear in order
-
-**Example:**
-```
-Search for "Button" in SwiftUI and my project at /Users/me/MyApp
-Search for "VM" to find all ViewModels
-```
-
-### `get_dependency_docs`
-
-Fetch README and documentation from a dependency's GitHub repository. Use this to understand how to use a third-party library.
-
-**Parameters:**
-- `github_url` (optional): Direct GitHub URL to the repository
-- `project_path` (optional): Path to Swift project (to look up dependency URLs)
-- `dependency_name` (optional): Name of the dependency to look up
-
-**Example:**
-```
-Get the documentation for Alamofire from my project's dependencies
-Fetch the README from https://github.com/Alamofire/Alamofire
-```
-
-### `get_project_summary`
-
-Get a quick overview of a Swift project including targets, dependencies, and key public types. **Use this first when starting work on an unfamiliar project.**
-
-**Parameters:**
-- `project_path` (required): Path to Package.swift, .xcodeproj, or directory
-
-**Example:**
-```
-Give me an overview of the project at /Users/me/MyApp
-```
-
-**Output includes:**
-- Project name and type
-- All targets with their dependencies
-- External dependencies with versions
-- Key public types (structs, classes, protocols, enums)
-
-### `swift_build`
-
-Build a Swift package using `swift build`. Returns structured JSON with build status, errors, warnings, and duration.
-
-**Parameters:**
-- `project_path` (required): Path to Package.swift or directory containing it
-- `configuration` (optional): "debug" or "release" (default: "debug")
-- `target` (optional): Specific target to build
-- `clean` (optional): Clean before building (default: false)
-
-**Example:**
-```
-Build my Swift package at /Users/me/MyApp in release mode
-```
-
-### `swift_test`
-
-Run Swift package tests using `swift test`. Returns structured JSON with test results including passed, failed, skipped counts and individual test case details.
-
-**Parameters:**
-- `project_path` (required): Path to Package.swift or directory containing it
-- `filter` (optional): Test filter pattern (e.g., "MyTests.testFoo")
-- `parallel` (optional): Run tests in parallel (default: true)
-- `enable_code_coverage` (optional): Enable code coverage (default: false)
-
-**Example:**
-```
-Run tests for my Swift package, filtering to just the NetworkTests
-```
-
-### `swift_run`
-
-Run a Swift package executable using `swift run`. Returns stdout, stderr, exit code, and duration.
-
-**Parameters:**
-- `project_path` (required): Path to Package.swift or directory containing it
-- `executable` (optional): Name of the executable to run
-- `arguments` (optional): Arguments to pass to the executable
-- `configuration` (optional): "debug" or "release" (default: "debug")
-- `timeout` (optional): Timeout in seconds (default: 60)
-
-**Example:**
-```
-Run the CLI tool in my package with --help flag
-```
-
-### `xcodebuild_build`
-
-Build an Xcode project or workspace using `xcodebuild`. Returns structured JSON with build status, errors, warnings, and duration.
-
-**Parameters:**
-- `project_path` (required): Path to .xcodeproj, .xcworkspace, or directory
-- `scheme` (optional): Scheme name (auto-detected if not provided)
-- `configuration` (optional): "Debug" or "Release" (default: "Debug")
-- `destination` (optional): Full destination specifier
-- `destination_platform` (optional): Platform shorthand ("iOS Simulator", "macOS", etc.)
-- `clean` (optional): Clean before building (default: false)
-
-**Example:**
-```
-Build my iOS app for the iPhone 16 simulator
-```
-
-### `xcodebuild_test`
-
-Run Xcode project tests using `xcodebuild test`. Returns structured JSON with test results.
-
-**Parameters:**
-- `project_path` (required): Path to .xcodeproj, .xcworkspace, or directory
-- `scheme` (optional): Scheme name (auto-detected if not provided)
-- `destination` (optional): Full destination specifier
-- `destination_platform` (optional): Platform shorthand
-- `test_plan` (optional): Test plan name
-- `only_testing` (optional): Specific tests to run
-- `skip_testing` (optional): Tests to skip
-- `enable_code_coverage` (optional): Enable code coverage (default: false)
-
-**Example:**
-```
-Run the unit tests for my iOS app on the simulator
-```
-
-### `list_schemes`
-
-List available schemes for an Xcode project or Swift package.
-
-**Parameters:**
-- `project_path` (required): Path to .xcodeproj, .xcworkspace, or Package.swift
-
-**Example:**
-```
-What schemes are available in my Xcode project?
-```
-
-### `list_destinations`
-
-List available build destinations for a project (simulators, devices, etc.).
-
-**Parameters:**
-- `project_path` (required): Path to .xcodeproj or .xcworkspace
-- `scheme` (optional): Scheme to get destinations for
-- `platform` (optional): Filter by platform ("iOS", "macOS", "tvOS", "watchOS", "visionOS")
-
-**Example:**
-```
-What iOS simulators are available for building my app?
-```
-
-### `instruments_profile`
-
-Profile an application using Instruments. Supports any Instruments template (Time Profiler, Allocations, Leaks, etc.).
-
-**Parameters:**
-- `target` (required): Path to app bundle, executable, or process ID to profile
-- `template` (required): Instruments template name (e.g., "Time Profiler", "Allocations", "Leaks")
-- `duration` (optional): Recording duration in seconds (default: 10)
-- `output_path` (optional): Output path for .trace file
-- `device` (optional): Device identifier for iOS/watchOS apps
-
-**Example:**
-```
-Profile my app for memory leaks using the Leaks template
-```
-
-### `list_instruments_templates`
-
-List available Instruments profiling templates.
-
-**Parameters:** None
-
-**Example:**
-```
-What Instruments templates are available for profiling?
-```
-
-## How It Works
-
-### Symbol Extraction
-
-AppleDocsTool uses Swift's built-in `swift symbolgraph-extract` tool to generate structured symbol information from compiled Swift modules. This provides accurate type information, function signatures, and documentation comments.
-
-### Apple Documentation
-
-Documentation is fetched from Apple's public JSON API at `developer.apple.com/tutorials/data/documentation/`. This ensures you always get the latest documentation for Apple frameworks.
-
-When local Xcode documentation is available, AppleDocsTool can also parse `.swiftinterface` files from the macOS SDK for offline access.
-
-## Supported Project Types
-
-- **Swift Package Manager** - Projects with `Package.swift`
-- **Xcode Projects** - `.xcodeproj` bundles
-- **Xcode Workspaces** - `.xcworkspace` bundles
-
-## Troubleshooting
-
-### "No symbols found"
-
-- Ensure the project builds successfully (`swift build` or Xcode build)
-- For SPM packages, symbols are extracted from built modules in `.build/`
-- Check that symbols meet the minimum access level (default: public)
-
-### "Framework not found"
-
-- Verify the framework name matches Apple's naming (case-sensitive)
-- Common frameworks: SwiftUI, Foundation, UIKit, AppKit, Combine, CoreData
-
-### Connection Issues
-
-- Ensure the MCP server path is correct in your configuration
-- Check that the executable has execute permissions: `chmod +x AppleDocsTool`
-- View Claude Code logs for connection errors
+- [Claude Code](https://claude.ai/code)
 
 ## Development
+
+```bash
+# Build
+swift build
+
+# Test
+swift test
+
+# Run minimal server
+swift run
+
+# Run full server
+swift run apple-docs --full
+```
 
 ### Project Structure
 
 ```
 AppleDocsTool/
 ├── Package.swift
-└── Sources/AppleDocsTool/
-    ├── main.swift                 # Entry point
-    ├── Server/
-    │   └── MCPServer.swift        # MCP server & tool handlers (16 tools)
-    ├── Models/
-    │   ├── Symbol.swift           # Swift symbol representation
-    │   ├── Documentation.swift    # Apple docs models
-    │   └── Project.swift          # Project configuration
-    └── Services/
-        ├── SymbolGraphService.swift   # swift-symbolgraph-extract wrapper
-        ├── DependencyService.swift    # Package dependency analysis
-        ├── GitHubDocsService.swift    # GitHub README/docs fetcher
-        ├── SearchService.swift        # Fuzzy search & ranking
-        ├── SPMParser.swift            # Package.swift parser
-        ├── XcodeProjectParser.swift   # .xcodeproj parser
-        ├── AppleDocsService.swift     # Apple web docs fetcher
-        └── LocalDocsService.swift     # Local Xcode docs reader
-```
-
-### Building
-
-```bash
-# Debug build
-swift build
-
-# Release build
-swift build -c release
-
-# Run tests
-swift test
+├── skills/                      # Shell-based workflows
+│   ├── SKILLS.md               # Skill index
+│   ├── analyze-project/
+│   ├── build-and-test/
+│   ├── control-simulator/
+│   ├── lookup-docs/
+│   ├── profile-app/
+│   └── ui-interact/
+└── Sources/
+    └── AppleDocsTool/
+        ├── Server/
+        │   ├── MinimalMCPServer.swift  # 3 UI tools (default)
+        │   └── MCPServer.swift         # 33 tools (--full)
+        ├── Services/                    # Core functionality
+        └── Models/                      # Data types
 ```
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
-## Acknowledgments
-
-- [MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk) - Official Model Context Protocol SDK for Swift
-- [Apple Developer Documentation](https://developer.apple.com/documentation/) - Source for framework documentation
