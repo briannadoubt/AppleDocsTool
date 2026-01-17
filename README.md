@@ -6,7 +6,7 @@ Apple development tools for Claude Code - simulator UI automation, project analy
 
 **From GitHub (works now):**
 ```bash
-/plugin marketplace add briannadoubt/AppleDocsTool
+/plugin marketplace add briannadoubt/claude-marketplace
 /plugin install apple-docs@briannadoubt
 ```
 
