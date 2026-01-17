@@ -16,6 +16,19 @@ jobs:
       - name: Show Swift version
         run: swift --version
 
+      - name: List available simulators
+        run: xcrun simctl list devices available
+
+      - name: Boot a simulator
+        run: |
+          # Boot first available iPhone simulator
+          DEVICE_ID=$(xcrun simctl list devices available -j | jq -r '.devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.name | contains("iPhone")) | .udid' | head -1)
+          if [ -n "$DEVICE_ID" ]; then
+            echo "Booting simulator: $DEVICE_ID"
+            xcrun simctl boot "$DEVICE_ID" || true
+            sleep 5
+          fi
+
       - name: Build
         run: swift build
 

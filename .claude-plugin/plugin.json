@@ -1,0 +1,13 @@
+{
+  "name": "apple-docs",
+  "version": "1.0.0",
+  "description": "Apple development tools for Claude Code - simulator UI automation, project analysis, build/test, and documentation lookup",
+  "author": {
+    "name": "briannadoubt"
+  },
+  "repository": "https://github.com/briannadoubt/AppleDocsTool",
+  "license": "MIT",
+  "keywords": ["apple", "ios", "swift", "xcode", "simulator", "macos", "swiftui", "uikit"],
+  "mcpServers": "../.mcp.json",
+  "skills": "../skills/"
+}

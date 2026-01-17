@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "apple-docs": {
+      "command": "swift",
+      "args": ["run", "--package-path", "${CLAUDE_PLUGIN_ROOT}", "apple-docs"]
+    }
+  }
+}

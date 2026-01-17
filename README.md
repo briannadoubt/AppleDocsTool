@@ -1,28 +1,38 @@
 # AppleDocsTool
 
-An MCP server for Apple development with Claude Code. Provides UI automation, project analysis, and Apple documentation lookup.
+Apple development tools for Claude Code - simulator UI automation, project analysis, build/test, and documentation lookup.
 
-## Quick Install
+## Install
 
+**From GitHub (works now):**
 ```bash
-# Install with Mint (recommended)
-brew install mint
-mint install briannadoubt/AppleDocsTool
-
-# Add to Claude Code
-claude mcp add apple-docs ~/.mint/bin/apple-docs
+/plugin marketplace add briannadoubt/claude-marketplace
+/plugin install apple-docs@briannadoubt
 ```
 
-**Alternative: Build from source**
+**From official marketplace (after approval):**
+```bash
+/plugin install apple-docs
+```
+
+<details>
+<summary>Alternative: Local install</summary>
+
 ```bash
 git clone https://github.com/briannadoubt/AppleDocsTool.git
+claude plugin install ./AppleDocsTool --scope user
+```
+
+Or MCP-only (no skills):
+```bash
 cd AppleDocsTool && swift build -c release
 claude mcp add apple-docs .build/release/apple-docs
 ```
+</details>
 
-Verify it's working:
+**Verify:**
 ```bash
-claude mcp list
+/plugin list    # should show apple-docs
 ```
 
 ## Architecture
@@ -175,6 +185,9 @@ swift run apple-docs --full
 
 ```
 AppleDocsTool/
+├── .claude-plugin/
+│   └── plugin.json              # Plugin manifest
+├── .mcp.json                    # MCP server config
 ├── Package.swift
 ├── skills/                      # Shell-based workflows
 │   ├── SKILLS.md               # Skill index
