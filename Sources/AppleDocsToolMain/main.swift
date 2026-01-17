@@ -1,8 +1,8 @@
 import Foundation
-import MCP
+import AppleDocsToolCore
 
-// Use minimal server by default (skills-based approach)
-// Pass --full for all 30+ tools
+// Use minimal server by default (skills-first approach)
+// Pass --full for all 33 tools
 let useMinimal = !CommandLine.arguments.contains("--full")
 
 Task {

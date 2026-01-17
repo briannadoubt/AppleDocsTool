@@ -12,18 +12,55 @@ struct OutputParser {
 
         let lines = output.components(separatedBy: .newlines)
 
-        // Pattern: /path/to/File.swift:42:10: error: message
-        // Pattern: /path/to/File.swift:42:10: warning: message
+        // Pattern 1: /path/to/File.swift:42:10: error: message
         let diagnosticPattern = #"^(.+):(\d+):(\d+):\s*(error|warning|note):\s*(.+)$"#
         let diagnosticRegex = try? NSRegularExpression(pattern: diagnosticPattern, options: [])
 
+        // Pattern 2: error: message (no file location)
+        // Matches: "error: Module 'X' not found", "xcodebuild: error: ...", etc.
+        let simpleErrorPattern = #"^(?:xcodebuild:\s*)?(error|warning):\s*(.+)$"#
+        let simpleErrorRegex = try? NSRegularExpression(pattern: simpleErrorPattern, options: [.caseInsensitive])
+
+        // Pattern 3: Linker errors - "ld: library not found for -lXXX"
+        let linkerErrorPattern = #"^ld:\s*(.+)$"#
+        let linkerErrorRegex = try? NSRegularExpression(pattern: linkerErrorPattern, options: [])
+
+        // Pattern 4: Clang errors - "clang: error: xxx"
+        let clangErrorPattern = #"^clang:\s*(error|warning):\s*(.+)$"#
+        let clangErrorRegex = try? NSRegularExpression(pattern: clangErrorPattern, options: [])
+
+        // Track failed build commands section
+        var inFailedCommandsSection = false
+        var failedCommands: [String] = []
+
         for line in lines {
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+
+            // Check for "The following build commands failed:" section
+            if trimmedLine.contains("The following build commands failed:") {
+                inFailedCommandsSection = true
+                continue
+            }
+
+            if inFailedCommandsSection {
+                // End of failed commands section (usually ends with a count line)
+                if trimmedLine.hasPrefix("(") && trimmedLine.contains("failure") {
+                    inFailedCommandsSection = false
+                    continue
+                }
+                // Capture failed command
+                if !trimmedLine.isEmpty && !trimmedLine.hasPrefix("**") {
+                    failedCommands.append(trimmedLine)
+                }
+                continue
+            }
+
+            // Pattern 1: File with line/column location
             if let match = diagnosticRegex?.firstMatch(
                 in: line,
                 options: [],
                 range: NSRange(line.startIndex..., in: line)
-            ) {
-                guard match.numberOfRanges >= 6 else { continue }
+            ), match.numberOfRanges >= 6 {
 
                 let file = extractGroup(match, 1, from: line)
                 let lineNum = Int(extractGroup(match, 2, from: line))
@@ -51,7 +88,89 @@ struct OutputParser {
                 } else if severity == .warning {
                     warnings.append(diagnostic)
                 }
+                continue
             }
+
+            // Pattern 2: Simple error/warning without file location
+            if let match = simpleErrorRegex?.firstMatch(
+                in: line,
+                options: [],
+                range: NSRange(line.startIndex..., in: line)
+            ), match.numberOfRanges >= 3 {
+                let severityStr = extractGroup(match, 1, from: line).lowercased()
+                let message = extractGroup(match, 2, from: line)
+
+                let diagnostic = BuildDiagnostic(
+                    message: message,
+                    file: nil,
+                    line: nil,
+                    column: nil,
+                    severity: severityStr == "error" ? .error : .warning
+                )
+
+                if severityStr == "error" {
+                    errors.append(diagnostic)
+                } else {
+                    warnings.append(diagnostic)
+                }
+                continue
+            }
+
+            // Pattern 3: Linker errors
+            if let match = linkerErrorRegex?.firstMatch(
+                in: line,
+                options: [],
+                range: NSRange(line.startIndex..., in: line)
+            ), match.numberOfRanges >= 2 {
+                let message = "ld: " + extractGroup(match, 1, from: line)
+
+                let diagnostic = BuildDiagnostic(
+                    message: message,
+                    file: nil,
+                    line: nil,
+                    column: nil,
+                    severity: .error
+                )
+                errors.append(diagnostic)
+                continue
+            }
+
+            // Pattern 4: Clang errors
+            if let match = clangErrorRegex?.firstMatch(
+                in: line,
+                options: [],
+                range: NSRange(line.startIndex..., in: line)
+            ), match.numberOfRanges >= 3 {
+                let severityStr = extractGroup(match, 1, from: line).lowercased()
+                let message = "clang: " + extractGroup(match, 2, from: line)
+
+                let diagnostic = BuildDiagnostic(
+                    message: message,
+                    file: nil,
+                    line: nil,
+                    column: nil,
+                    severity: severityStr == "error" ? .error : .warning
+                )
+
+                if severityStr == "error" {
+                    errors.append(diagnostic)
+                } else {
+                    warnings.append(diagnostic)
+                }
+                continue
+            }
+        }
+
+        // Add failed commands as errors if we captured any
+        for command in failedCommands {
+            let diagnostic = BuildDiagnostic(
+                message: "Failed: \(command)",
+                file: nil,
+                line: nil,
+                column: nil,
+                severity: .error
+            )
+            errors.append(diagnostic)
         }
 
         return (errors, warnings)
@@ -83,6 +202,13 @@ struct OutputParser {
         // Swift 5.x format: Test Case 'TestClass.testMethod' passed (0.001 seconds).
         let swiftTestPattern = #"Test Case '(\S+)\.(\S+)' (passed|failed|skipped) \(([\d.]+) seconds\)"#
         let swiftTestRegex = try? NSRegularExpression(pattern: swiftTestPattern, options: [])
+
+        // Swift Testing framework format (new in Swift 6):
+        // 􁁛  Test testName() passed after 0.008 seconds.
+        // ✘  Test testName() failed after 0.008 seconds.
+        // The emoji varies: 􁁛 (passed), ✘ (failed), ○ (skipped)
+        let swiftTestingPattern = #"Test (\S+)\(\) (passed|failed|skipped) after ([\d.]+) seconds"#
+        let swiftTestingRegex = try? NSRegularExpression(pattern: swiftTestingPattern, options: [])
 
         // Failure pattern: /path/File.swift:42: error: -[Module.Class testMethod] : XCTAssertEqual failed
         let failurePattern = #"(.+):(\d+): error: .+ : (.+)$"#
@@ -157,6 +283,39 @@ struct OutputParser {
                 let testCase = TestCase(
                     name: testName,
                     className: className,
+                    duration: duration,
+                    status: status,
+                    failureMessage: status == .failed ? currentFailureMessage : nil,
+                    failureLocation: status == .failed ? currentFailureLocation : nil
+                )
+                testCases.append(testCase)
+
+                if status == .failed {
+                    currentFailureMessage = nil
+                    currentFailureLocation = nil
+                }
+            }
+            // Try Swift Testing framework format (Swift 6+)
+            // Format: 􁁛  Test testName() passed after 0.008 seconds.
+            else if let match = swiftTestingRegex?.firstMatch(
+                in: line,
+                options: [],
+                range: NSRange(line.startIndex..., in: line)
+            ), match.numberOfRanges >= 4 {
+                let testName = extractGroup(match, 1, from: line)
+                let statusStr = extractGroup(match, 2, from: line)
+                let duration = Double(extractGroup(match, 3, from: line)) ?? 0
+
+                let status: TestStatus
+                switch statusStr {
+                case "passed": status = .passed
+                case "failed": status = .failed
+                default: status = .skipped
+                }
+
+                let testCase = TestCase(
+                    name: testName,
+                    className: "SwiftTesting",
                     duration: duration,
                     status: status,
                     failureMessage: status == .failed ? currentFailureMessage : nil,
@@ -303,6 +462,140 @@ struct OutputParser {
         }
 
         return templates
+    }
+
+    // MARK: - Simctl Output Parsing
+
+    /// Parse simctl list devices --json output
+    static func parseSimulatorDevices(_ jsonString: String) throws -> [String: [SimulatorDevice]] {
+        guard let data = jsonString.data(using: .utf8) else {
+            return [:]
+        }
+
+        struct DevicesResponse: Decodable {
+            let devices: [String: [SimulatorDevice]]
+        }
+
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(DevicesResponse.self, from: data)
+        return response.devices
+    }
+
+    /// Parse simctl list runtimes --json output
+    static func parseSimulatorRuntimes(_ jsonString: String) throws -> [SimulatorRuntime] {
+        guard let data = jsonString.data(using: .utf8) else {
+            return []
+        }
+
+        struct RuntimesResponse: Decodable {
+            let runtimes: [SimulatorRuntime]
+        }
+
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(RuntimesResponse.self, from: data)
+        return response.runtimes
+    }
+
+    /// Parse simctl list devicetypes --json output
+    static func parseSimulatorDeviceTypes(_ jsonString: String) throws -> [SimulatorDeviceType] {
+        guard let data = jsonString.data(using: .utf8) else {
+            return []
+        }
+
+        struct DeviceTypesResponse: Decodable {
+            let devicetypes: [SimulatorDeviceType]
+        }
+
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(DeviceTypesResponse.self, from: data)
+        return response.devicetypes
+    }
+
+    /// Parse simctl list --json output (combined devices and runtimes)
+    static func parseSimulatorList(_ jsonString: String) throws -> SimulatorListResult {
+        guard let data = jsonString.data(using: .utf8) else {
+            return SimulatorListResult(devices: [:], runtimes: nil)
+        }
+
+        struct ListResponse: Decodable {
+            let devices: [String: [SimulatorDevice]]
+            let runtimes: [SimulatorRuntime]?
+        }
+
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(ListResponse.self, from: data)
+        return SimulatorListResult(devices: response.devices, runtimes: response.runtimes)
+    }
+
+    /// Parse simctl listapps output (plist format)
+    static func parseInstalledApps(_ plistString: String) throws -> [InstalledApp] {
+        guard let data = plistString.data(using: .utf8) else {
+            return []
+        }
+
+        guard let plist = try PropertyListSerialization.propertyList(
+            from: data,
+            format: nil
+        ) as? [String: [String: Any]] else {
+            return []
+        }
+
+        return plist.compactMap { (bundleId, info) -> InstalledApp? in
+            let name = info["CFBundleName"] as? String
+                ?? info["CFBundleDisplayName"] as? String
+                ?? bundleId
+            let version = info["CFBundleShortVersionString"] as? String
+            let applicationType = info["ApplicationType"] as? String ?? "User"
+
+            return InstalledApp(
+                bundleIdentifier: bundleId,
+                name: name,
+                version: version,
+                applicationType: applicationType
+            )
+        }
+    }
+
+    /// Parse simctl appinfo output (key: value pairs)
+    static func parseAppInfo(_ output: String) -> AppInfo? {
+        var info: [String: String] = [:]
+        let lines = output.components(separatedBy: .newlines)
+
+        for line in lines {
+            let parts = line.split(separator: ":", maxSplits: 1)
+            if parts.count == 2 {
+                let key = parts[0].trimmingCharacters(in: .whitespaces)
+                let value = parts[1].trimmingCharacters(in: .whitespaces)
+                info[key] = value
+            }
+        }
+
+        guard let bundleId = info["ApplicationIdentifier"]
+            ?? info["CFBundleIdentifier"]
+            ?? info["Bundle"] else {
+            return nil
+        }
+
+        return AppInfo(
+            bundleIdentifier: bundleId,
+            name: info["CFBundleName"] ?? info["CFBundleDisplayName"],
+            version: info["CFBundleShortVersionString"],
+            bundleVersion: info["CFBundleVersion"],
+            dataContainer: info["DataContainer"],
+            bundlePath: info["Path"] ?? info["Bundle"],
+            applicationType: info["ApplicationType"]
+        )
+    }
+
+    /// Parse simctl launch output for PID
+    static func parseLaunchPID(_ output: String) -> Int? {
+        // Output format: "com.example.app: 12345"
+        let parts = output.components(separatedBy: ":")
+        if parts.count >= 2 {
+            let pidString = parts.last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return Int(pidString)
+        }
+        return nil
     }
 
     // MARK: - Helper Methods
