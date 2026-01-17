@@ -1,6 +1,6 @@
 {
   "name": "apple-docs",
-  "version": "1.0.0",
+  "version": "0.2.1",
   "description": "Apple development tools for Claude Code - simulator UI automation, project analysis, build/test, and documentation lookup",
   "author": {
     "name": "briannadoubt"
