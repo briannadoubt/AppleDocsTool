@@ -2,7 +2,11 @@
   "mcpServers": {
     "apple-docs": {
       "command": "swift",
-      "args": ["run", "--package-path", "${CLAUDE_PLUGIN_ROOT}", "apple-docs"]
+      "args": ["run", "--package-path", "/Users/bri/dev/AppleDocsTool", "apple-docs"]
+    },
+    "apple-docs-full": {
+      "command": "swift",
+      "args": ["run", "--package-path", "/Users/bri/dev/AppleDocsTool", "apple-docs", "--full"]
     }
   }
 }
