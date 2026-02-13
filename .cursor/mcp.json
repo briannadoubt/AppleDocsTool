@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "apple-docs": {
+      "command": "swift",
+      "args": ["run", "--package-path", ".", "apple-docs"]
+    },
+    "apple-docs-full": {
+      "command": "swift",
+      "args": ["run", "--package-path", ".", "apple-docs", "--full"]
+    }
+  }
+}
