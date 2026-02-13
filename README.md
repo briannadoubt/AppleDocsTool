@@ -1,8 +1,10 @@
 # AppleDocsTool
 
-Apple development tools for Claude Code - simulator UI automation, project analysis, build/test, and documentation lookup.
+Apple development tools for Claude Code and Cursor - simulator UI automation, project analysis, build/test, and documentation lookup.
 
 ## Install
+
+### Claude Code Plugin
 
 **From GitHub (works now):**
 ```bash
@@ -16,7 +18,7 @@ Apple development tools for Claude Code - simulator UI automation, project analy
 ```
 
 <details>
-<summary>Alternative: Local install</summary>
+<summary>Alternative: Local Claude install</summary>
 
 ```bash
 git clone https://github.com/briannadoubt/AppleDocsTool.git
@@ -30,10 +32,24 @@ claude mcp add apple-docs .build/release/apple-docs
 ```
 </details>
 
-**Verify:**
+**Verify Claude install:**
 ```bash
 /plugin list    # should show apple-docs
 ```
+
+### Cursor MCP
+
+Cursor project-level MCP config is included at `.cursor/mcp.json`.
+
+```bash
+git clone https://github.com/briannadoubt/AppleDocsTool.git
+cd AppleDocsTool
+swift build
+```
+
+Then in Cursor, open this repository and enable the `apple-docs` (minimal) or `apple-docs-full` server from MCP settings.
+
+Cursor skills/rules are included at `.cursor/rules/apple-docs-skills.mdc` and route tasks to the shell-first workflows in `skills/`.
 
 ## Architecture
 
@@ -49,7 +65,7 @@ By default, the server exposes only 3 tools that **require** macOS Accessibility
 
 ## Skills
 
-Claude discovers capabilities by reading `skills/SKILLS.md`:
+Claude and Cursor agents discover capabilities from `skills/SKILLS.md`:
 
 | Skill | Description | Example Commands |
 |-------|-------------|------------------|
@@ -77,7 +93,7 @@ Only tools that can't be done with shell commands:
 For all 33 tools (project symbols, Apple docs, build/test, profiling, etc.):
 
 ```bash
-# Configure with --full flag
+# Claude: configure with --full flag
 claude mcp add apple-docs ~/.mint/bin/apple-docs --args --full
 ```
 
@@ -164,6 +180,7 @@ Claude: [Calls simulator_find_text(text: "Login")]
 - macOS 13.0+
 - Swift 6.0+ (Xcode 16+)
 - [Claude Code](https://claude.ai/code)
+- [Cursor](https://www.cursor.com/) (optional, for MCP client support)
 
 ## Development
 
@@ -185,6 +202,10 @@ swift run apple-docs --full
 
 ```
 AppleDocsTool/
+├── .cursor/
+│   ├── mcp.json                 # Cursor MCP server config
+│   └── rules/
+│       └── apple-docs-skills.mdc # Cursor skill-routing rule
 ├── .claude-plugin/
 │   └── plugin.json              # Plugin manifest
 ├── .mcp.json                    # MCP server config

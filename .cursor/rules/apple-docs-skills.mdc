@@ -1,0 +1,33 @@
+---
+description: Use AppleDocsTool shell-first skills for project analysis, build/test, docs lookup, simulator control, profiling, and UI automation.
+globs: []
+alwaysApply: true
+---
+
+# AppleDocsTool Skills (Cursor)
+
+Use the repository skills as the default workflow source for Apple development tasks.
+
+## Discovery
+
+1. Read `skills/SKILLS.md` first to select the right capability.
+2. Read only the relevant `skills/<skill-name>/SKILL.md`.
+3. Execute shell commands from the selected skill directly.
+
+## Skill Selection
+
+- `skills/analyze-project/SKILL.md`: project structure, symbols, dependencies.
+- `skills/build-and-test/SKILL.md`: build/test flows and failure debugging.
+- `skills/lookup-docs/SKILL.md`: Apple API and dependency docs lookup.
+- `skills/control-simulator/SKILL.md`: simulator lifecycle and app/device control.
+- `skills/profile-app/SKILL.md`: Instruments and performance profiling.
+- `skills/ui-interact/SKILL.md`: UI automation and visual-state interactions.
+
+## Execution Rules
+
+1. Prefer shell-first workflows (`swift`, `xcodebuild`, `xcrun simctl`, `xcrun xctrace`).
+2. Use MCP tools when shell commands are insufficient:
+   - structured symbol/doc output
+   - simulator OCR and coordinate-based UI interactions
+3. For UI automation tasks, prefer `apple-docs` MCP tools from `.cursor/mcp.json`.
+4. Keep context small: load only the files and sections needed for the current task.
